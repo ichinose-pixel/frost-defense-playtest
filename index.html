@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>フロスト・ディフェンス — 灯の集落</title>
+    <link rel="stylesheet" href="styles/game.css?v=21" />
+  </head>
+  <body>
+    <div id="gameViewport">
+      <div id="playTools" hidden>
+        <span class="brandMark">FROST / 灯の集落</span
+        ><button id="pauseBtn" aria-label="一時停止と設定">Ⅱ</button>
+      </div>
+      <section id="journey" hidden aria-live="polite">
+        <b id="journeyTitle"></b><span id="journeySub"></span>
+      </section>
+      <div id="waypoint" hidden aria-hidden="true">◆</div>
+      <div id="furnaceDirection" class="edgeCue" hidden></div><div id="raidDirection" class="edgeCue raid" hidden></div><div id="gestureGuide" hidden><i>☝</i><span>すべらせる → 離す → 建築</span></div>
+      <div id="repairStation" class="station" hidden>修理 · 木材30</div>
+      <div id="fuelStation" class="station" hidden>石炭 → 炉</div>
+      <div id="baseStation" class="station" hidden>集落を強化</div>
+      <section id="actionPanel" hidden>
+        <b id="actionTitle"></b><span id="actionCost"></span>
+        <div class="dwellTrack"><i id="actionFill"></i></div>
+        <small id="actionHelp"></small>
+      </section>
+      <div id="victoryMoment" hidden></div>
+      <button id="victorySkip" hidden>演出をスキップ ›</button>
+      <div id="hud" class="hidden">
+        <div class="chip resource wood-chip">
+          <small>木材</small><b>🌲 <span id="wood">0</span></b>
+        </div>
+        <div class="chip resource coal-chip">
+          <small>石炭</small><b>🪨 <span id="coal">0</span></b>
+        </div>
+        <div class="chip resource iron-chip">
+          <small>鉄</small><b>⚙️ <span id="iron">0</span></b>
+        </div>
+        <div class="chip status">
+          <small>STAGE <span id="stageNumber">1</span></small
+          ><b
+            ><span id="phase">🌞</span> <span id="day">1</span><em>/ 7日</em></b
+          >
+        </div>
+        <div class="chip status">
+          <small>気温</small><b><span id="temp">-10</span><em>℃</em></b>
+        </div>
+        <div class="chip status" id="fuelChip">
+          <small>燃料</small><b>🔥 <span id="fire">100</span><em>%</em></b
+          ><i class="meter"><i id="fuelMeter"></i></i>
+        </div>
+        <div class="chip status" id="baseChip">
+          <small>集落 Lv.<span id="baseLv">1</span></small
+          ><b>🏰 <span id="base">100</span><em>%</em></b
+          ><i class="meter"><i id="baseMeter"></i></i>
+        </div>
+        <div id="bossPanel" hidden>
+          <div><b>霜翼竜</b><span id="bossHealth">100%</span></div>
+          <div class="bossTrack"><div id="bossFill"></div></div>
+          <small id="bossState">飛来中</small>
+        </div>
+        <div id="phaseBar">
+          <span id="phaseCaption">夜まで24秒</span>
+          <div class="phaseTrack"><div id="phaseFill"></div></div>
+        </div>
+      </div>
+      <div id="crosshair" class="hidden">+</div>
+      <div id="baseBadge" class="hidden">🏰 拠点 <span>Lv.1</span></div>
+      <div id="missionCard" class="hidden">
+        <div class="missionLabel">MISSION</div>
+        <div id="objective"></div>
+        <div id="miniTip"></div>
+      </div>
+      <div id="combo">COMBO x<span id="comboN">2</span></div>
+      <div id="modeRow" class="hidden"></div>
+      <button id="actBtn" class="hidden"></button
+      ><button id="fuelBtn" class="hidden"></button>
+      <div id="joyBase"></div>
+      <div id="joyKnob"></div>
+      <div id="autoHint" class="hidden"></div>
+      <div id="waveBanner"></div>
+      <div id="toast"></div>
+      <div id="flash"></div>
+      <div id="groundLabels"></div>
+      <div id="bossDirection" hidden>
+        <span id="bossArrow">➜</span><b>BOSS</b>
+      </div>
+      <div id="runtimeStatus" role="status" hidden></div>
+      <div id="title" class="overlay">
+        <div class="eyebrow">A LITTLE LIGHT IN THE SNOW</div>
+        <div class="titleEmblem" aria-hidden="true">◆</div>
+        <h1>フロスト・ディフェンス</h1>
+        <h2>灯の集落</h2>
+        <p class="titleLead">
+          木を集め、灯を育て、<br />小さな集落の夜を守る。
+        </p>
+        <div id="stageSelect" aria-label="ステージ選択"></div>
+        <p id="stageDescription"></p>
+        <p id="campaignRecord" hidden></p>
+        <button class="btn" id="continueBtn" hidden>つづきから</button>
+        <button class="btn" id="startBtn">はじめる</button>
+        <p id="campaignNote"></p>
+        <p class="controlNote">
+          指1本で移動 · 採集と射撃は自動<br />建築は、そばで指を離すだけ
+        </p>
+        <p id="startupError" role="alert" hidden></p>
+      </div>
+      <div id="pausePanel" class="overlay hidden">
+        <div class="eyebrow">ひと休み</div>
+        <h1>灯は、ここで待っています</h1>
+        <p id="pauseCaption"></p>
+        <button id="resumeBtn" class="btn">つづける</button>
+        <div class="settingsGrid">
+          <label
+            >効果音<input
+              id="soundLevel"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+          /></label>
+          <label
+            >音楽・環境音<input
+              id="ambienceLevel"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+          /></label>
+          <label>振動<input id="hapticsSetting" type="checkbox" /></label>
+          <label
+            >カメラの揺れ・演出の動き<input id="motionSetting" type="checkbox"
+          /></label>
+        </div>
+        <p id="saveStatus" role="status"></p>
+        <button id="homeBtn" class="secondaryBtn">保存してタイトルへ</button>
+      </div>
+      <div id="gameover" class="overlay hidden">
+        <h1 id="goTitle">🧊 炉の火が消えた…</h1>
+        <h2 id="goSub"></h2>
+        <p id="goStat"></p>
+        <p id="resultInsight" class="resultInsight"></p>
+        <p id="resultSaveNote" role="status"></p>
+        <button id="resultHomeBtn" class="secondaryBtn">集落の記録へ</button>
+        <button class="btn" id="retryBtn">もう一度挑戦</button>
+      </div>
+      <div id="upgrade" class="overlay hidden">
+        <h1>✨ 生存ボーナス</h1>
+        <h2>次の夜に備えて1つ強化</h2>
+        <div id="upgradeCards"></div>
+      </div>
+    </div>
+    <script src="vendor/three-0.160.0.min.js"></script>
+    <script src="dist/game.js?v=21"></script>
+  </body>
+</html>
