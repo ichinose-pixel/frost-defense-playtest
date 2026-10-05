@@ -211,6 +211,11 @@ function loadCampaignProgress() {
               rescued: r.rescued,
               outposts: Math.min(5, r.outposts),
               seconds: r.seconds,
+              level:Number.isInteger(r.level)&&r.level>=1&&r.level<=5?r.level:1,
+              buildings:Number.isInteger(r.buildings)&&r.buildings>=0&&r.buildings<=18?r.buildings:0,
+              hp:Number.isFinite(r.hp)&&r.hp>=0&&r.hp<=780?r.hp:0,
+              plan:["none","supply","guard"].includes(r.plan)?r.plan:"none",
+              image:validCampPortrait(r.image)?r.image:null,
             }))
         : [];
     }
@@ -227,6 +232,7 @@ function saveStageClear() {
     rescued,
     outposts: activeOutposts().length,
     seconds: Math.round(gameElapsed),
+    level: baseLevel, buildings: defenseState.size, hp:Math.round(baseHP), plan:campPlan,
   };
   const old = campaign.records.findIndex((r) => r.stage === currentStage);
   if (old < 0) campaign.records.push(record);
@@ -259,15 +265,10 @@ function renderStageSelection() {
     STAGES[selectedStage - 1].name + " — " + STAGES[selectedStage - 1].hint;
   const record = campaign.records.find((r) => r.stage === selectedStage);
   $("campaignRecord").textContent = record
-    ? "前回クリア：確保 " +
-      record.outposts +
-      "/5 ・ 撃破 " +
-      record.kills +
-      " ・ 救助 " +
-      record.rescued +
-      "人"
+    ? [`前回：撃破 ${record.kills}`, ...(record.buildings ? [`設備 ${record.buildings}`] : []), ...(record.rescued ? [`救助 ${record.rescued}人`] : []), ...(record.outposts ? [`確保 ${record.outposts}拠点`] : [])].join(" ・ ")
     : "";
   $("campaignRecord").hidden = !record;
+  renderCampAlbum(record);
   $("startBtn").textContent =
     "STAGE " +
     selectedStage +
@@ -378,6 +379,7 @@ function updateVictoryScene(dt) {
       (currentStage < 3
         ? `次は「${STAGES[currentStage].name}」。${STAGES[currentStage].hint}`
         : "3つの土地に灯が戻りました。集落の記録は保存されています。");
+    saveCampPortrait();
     victoryScene = null;
     $("goTitle").textContent = "この灯を、守り抜いた。";
     $("goSub").textContent =
@@ -799,6 +801,7 @@ function updateCanopyFocus() {
   } else canopyTarget.value.set(-10, -10);
 }
 function updateEdgeCues() {
+  $('flankDirection').hidden=true;
   if(introStep<4){$('furnaceDirection').hidden=true;$('raidDirection').hidden=true;return;}
   const rect = renderer.domElement.getBoundingClientRect();
   function place(id, x, z, label, always) {
@@ -810,12 +813,17 @@ function updateEdgeCues() {
     const a = Math.atan2(dy, dx), arrows = ['→','↘','↓','↙','←','↖','↑','↗'];
     el.textContent = arrows[(Math.round(a / (Math.PI / 4)) + 8) % 8] + ' ' + label;
     const scale = Math.min((rect.width / 2 - 48) / Math.max(1, Math.abs(dx)), (rect.height / 2 - 145) / Math.max(1, Math.abs(dy)));
-    el.style.left = rect.width / 2 + dx * scale + 'px';
+    const half=Math.min(rect.width/2-8,el.offsetWidth/2+8);
+    el.style.left = Math.max(half,Math.min(rect.width-half,rect.width / 2 + dx * scale)) + 'px';
     el.style.top = rect.height / 2 + dy * scale + 'px';
   }
   place('furnaceDirection', 0, 0, '炉', false);
   if (nextRaid && introStep >= 4) place('raidDirection', Math.cos(nextRaid.angle) * 30, Math.sin(nextRaid.angle) * 30, phase === 'night' ? '襲撃' : '次の襲撃', true);
   else $('raidDirection').hidden = true;
+  if(bossFlank?.wait>=0 && running && !paused) {
+    const a=(nextRaid?.angle||0)+Math.PI;
+    place('flankDirection',Math.cos(a)*30,Math.sin(a)*30,'側面2体・まもなく',true);
+  }
 }
 function resourceVisualParts(e) {
   const { x, y, z, b } = e;
@@ -861,7 +869,7 @@ function initAudio() {
   if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.22;
+  masterGain.gain.value = 1;
   masterGain.connect(audioCtx.destination);
   ambientGain = audioCtx.createGain();
   ambientGain.gain.value = 0.015 * settings.ambience;
@@ -1095,7 +1103,7 @@ function worldPop(textMsg, pos, color = "#fff") {
   setTimeout(() => el.remove(), 760);
 }
 
-function showWaveBanner(main, sub = "") {
+function showWaveBanner(main, sub = "", duration = 1200) {
   const el = $("waveBanner");
   el.innerHTML =
     main +
@@ -1104,7 +1112,7 @@ function showWaveBanner(main, sub = "") {
       : "");
   el.classList.add("show");
   clearTimeout(el._tm);
-  el._tm = setTimeout(() => el.classList.remove("show"), 1200);
+  el._tm = setTimeout(() => el.classList.remove("show"), duration);
 }
 
 // Bounded effects: no mesh creation and disposal on every animation frame.
@@ -1865,21 +1873,21 @@ function addSettlementPiece(kind, x, z) {
   settlementObjs.push(g);
 }
 
-function updateCampVisual() {
+function updateCampVisual(shownDay = day) {
   settlementObjs.forEach((g) => disposeObject(g));
   settlementObjs = [];
-  if (day >= 2) {
+  if (shownDay >= 2) {
     addSettlementPiece("tent", -1.9, 1.1);
     addSettlementPiece("tent", 2, 1);
   }
-  if (day >= 3) addSettlementPiece("hut", -2.3, -1.4);
-  if (day >= 4) addSettlementPiece("hut", 2.4, -1.4);
-  if (day >= 5) {
+  if (shownDay >= 3) addSettlementPiece("hut", -2.3, -1.4);
+  if (shownDay >= 4) addSettlementPiece("hut", 2.4, -1.4);
+  if (shownDay >= 5) {
     addSettlementPiece("tent", -4.2, 1.8);
     addSettlementPiece("tent", 4.2, 1.8);
   }
-  fireGroup.scale.setScalar(1 + Math.min(day - 1, 5) * 0.08);
-  fireLight.distance = 14 + Math.min(day, 6) * 2;
+  fireGroup.scale.setScalar(1 + Math.min(shownDay - 1, 5) * 0.08);
+  fireLight.distance = 14 + Math.min(shownDay, 6) * 2;
 }
 
 function clearCampExtras() {
@@ -2082,10 +2090,10 @@ function refreshOutpostTag(o) {
 function updateOutposts(dt) {
   for (const o of outposts) {
     refreshOutpostTag(o);
-    if (phase !== "day") continue;
+    if (phase !== "day" && campPlan !== "supply") continue;
     const d = Math.hypot(o.x - pPos.x, o.z - pPos.z);
     if (
-      !o.captured &&
+      phase === "day" && !o.captured &&
       baseLevel >= outpostInfo(o.type).need &&
       d < 2.4 &&
       !movementRequested()
@@ -2094,9 +2102,11 @@ function updateOutposts(dt) {
       if (o.progress > 0.7) {
         o.progress = 0;
         o.captured = true;
+        o.everCaptured = true;
+        outpostNotice = {type:o.type,until:gameElapsed+8};
         o.hp = o.maxHp;
         sfx("capture");
-        showWaveBanner("AREA SECURED", outpostInfo(o.type).name + " を確保");
+        showWaveBanner("拠点を確保", outpostInfo(o.type).name + " を確保");
         if (!o.rewardClaimed && o.type === "survivor") {
           rescued++;
           makeWorker(workerObjs.length);
@@ -2137,8 +2147,11 @@ function damageOutpost(o, dmg) {
   if (o.hp <= 0) {
     o.hp = 0;
     o.captured = false;
+    o.everCaptured = true;
+    outpostNotice = {type:o.type,until:gameElapsed+14};
+    if(trackedOutpost===o.type) trackedOutpost=null;
     o.progress = 0;
-    showWaveBanner("OUTPOST LOST", outpostInfo(o.type).name + " が陥落");
+    showWaveBanner("拠点が陥落", outpostInfo(o.type).name + " が陥落");
   }
 }
 
@@ -2435,7 +2448,7 @@ function upgradeDefense(hit) {
   showResourceDelivery(cost, hit.x, hit.z);
   burst(hit.x, 1.2, hit.z, st.type === "turret" ? 0x8ed1ff : 0xffd27a, 18);
   worldPop(
-    typeName(st.type) + " Lv." + st.level,
+    typeName(st.type,hit.x,hit.z) + " Lv." + st.level,
     new THREE.Vector3(hit.x, 2.3, hit.z),
     "#ffe19a",
   );
@@ -2443,7 +2456,7 @@ function upgradeDefense(hit) {
   toast(
     typeIcon(st.type) +
       " " +
-      typeName(st.type) +
+      typeName(st.type,hit.x,hit.z) +
       " をLv." +
       st.level +
       "に進化",
@@ -2507,8 +2520,9 @@ function updateDefenseCombat(dt, t) {
     for (const e of enemies) {
       if (!enemyTargetable(e)) continue;
       const d = g.position.distanceTo(e.model.g.position);
-      if (d < range && d < bd) {
-        bd = d;
+      const score = defenseTargetScore(e,d);
+      if (d < range && score < bd) {
+        bd = score;
         best = e;
       }
     }
@@ -2866,7 +2880,7 @@ function announceDragon(e) {
   e.model.g.children.forEach((o) => {
     if (o === e.model.g.userData.hpBack) o.visible = false;
   });
-  showWaveBanner("霜翼竜、襲来", "空を旋回する巨影を迎え撃て");
+  showWaveBanner("霜翼竜、襲来", "光る円から離れよう", 2200);
   sfx("boss");
 }
 function updateDragon(e, dt) {
@@ -2893,6 +2907,7 @@ function updateDragon(e, dt) {
     if (e.breathClock >= dragonBreathInterval(e)) {
       e.breathClock = 0;
       e.breathFlash = 0.4;
+      queueBossFlank();
       const aim = e.aim || { x: 0, z: 0 };
       const hitCamp = Math.hypot(aim.x, aim.z) < 4.6;
       const hitPlayer = Math.hypot(aim.x - pPos.x, aim.z - pPos.z) < 2.5;
@@ -2961,7 +2976,7 @@ function resetDragon() {
 function updateDragonUI() {
   const e = activeDragon,
     visible = !!e && (running || !!victoryScene);
-  $("bossPanel").hidden = !visible;
+  $("bossPanel").hidden = !visible || e.dragonAge < 2.5;
   $("bossDirection").hidden = true;
   if (!visible) {
     $("gameViewport").classList.remove("boss-active");
@@ -3228,6 +3243,13 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
 function spawnEnemyPack() {
   const allowance = nightSpawnAllowance();
   if (allowance <= 0) return;
+  if(bossFlank && !bossFlank.bossSpawned && waveLeft===5) {
+    bossFlank.bossSpawned=true;
+    const a=nextRaid?.angle||0,r=R_INNER-1.2;
+    spawnEnemy(Math.round(Math.cos(a)*r),Math.round(Math.sin(a)*r),'boss');
+    waveLeft--;
+    return;
+  }
   const a = stageSpawnAngle(),
     r = R_INNER - 1.2,
     baseX = Math.round(Math.cos(a) * r),
@@ -3761,8 +3783,7 @@ function updateObjective() {
         ? "準備ができるまで夜は来ません"
         : "夜まで " + Math.max(0, Math.ceil(phaseT)) + "秒"
       : inNightRespite() ? '次の群れ ' + Math.ceil(nightAssault.remaining) + '秒'
-      : nightAssault?.mode === 'first' ? '1群 残' + (waveLeft - nightAssault.reserve + enemies.length) + '体'
-      : nightAssault?.mode === 'second' ? '2群 残' + (waveLeft + enemies.length) + '体'
+      : nightAssault ? `${assaultIndex()+1}群 残${waveLeft-nightAssault.reserve+enemies.length}体`
       : "残り " + (waveLeft + enemies.length) + "体";
 }
 
@@ -4370,7 +4391,7 @@ const RAID_TYPES = {
   fuel: ["凍てつく風", "燃料が減りやすい。石炭を20以上集めて炉へ"],
   armored: ["鎧の襲撃隊", "硬い敵が来る。見張り台の強化が有効"],
   siege: ["破城の一団", "柵を壊す敵。火炎塔でまとめて迎撃"],
-  bossOmen: ["竜の足跡", "明日は霜翼竜。炉と火力を強化しよう"],
+  bossOmen: ["混成隊：鎧・投石・破城", "今夜は門と塔で足止め。明日は霜翼竜"],
   boss: ["霜翼竜", "印を炉から離して誘導 → 光る円の外へ"],
 };
 function planRaid() {
@@ -4453,7 +4474,7 @@ function actionCandidates() {
     if (distance <= reach) list.push({ ...a, distance });
   };
   for (const p of buildPads) {
-    if (p.built || p.constructing || baseLevel < requiredBaseLevel(p.type))
+    if ((phase === "night" && !inNightRespite()) || p.built || p.constructing || baseLevel < requiredBaseLevel(p.type))
       continue;
     if (
       introStep < 2 ||
@@ -4540,25 +4561,26 @@ function actionCandidates() {
       );
     if (phase === "day")
       for (const [k, st] of defenseState) {
-        if (st.level >= MAX_DEF_LV) continue;
+        if (st.level >= MAX_DEF_LV && st.type !== "wall") continue;
         const [x, y, z] = k.split(",").map(Number);
-        if(st.type==="wall" && isGateWall(x,z) && Math.abs(Math.abs(x)>=Math.abs(z)?pPos.z-z:pPos.x-x)<1.4)continue;
         add(
           {
             id: "upgrade:" + k,
-            title: typeName(st.type,x,z) + ` Lv.${st.level + 1}`,
+            title: typeName(st.type,x,z) + (st.level>=MAX_DEF_LV ? ` Lv.${st.level}（最大）` : ` Lv.${st.level} → ${st.level+1}`),
+            manual: st.type === "wall",
+            available: st.level < MAX_DEF_LV,
             effect:
               st.type === "wall"
-                ? "耐久アップ＋全回復"
+                ? st.level>=MAX_DEF_LV ? "これ以上は強化できません" : `耐久 ${Math.ceil(st.hp)} → ${getDefenseMaxHp(st.type,st.level+1)}・全回復`
                 : st.type === "turret" && st.level === 1 ? "青: 現在 / 金: 強化後の射程・全回復" : "火力・射程アップ＋全回復",
-            cost: getUpgradeCost(st),
+            cost: st.level>=MAX_DEF_LV ? {} : getUpgradeCost(st),
             x,
             z,
             tag: st.tag,
             apply: () => upgradeDefense({ x, y, z, state: st }),
           },
           distanceToDefense(st.type, x, z),
-          1.05,
+          st.type === "wall" ? 1.6 : 1.05,
         );
       }
   }
@@ -4572,31 +4594,75 @@ function buildingBenefit(type,x,z) {
     warehouse: "毎朝の支給が増える",
   }[type];
 }
+let selectedDefenseActionId=null, manualSelectionPinned=false, manualTargetOutline=null;
+function chooseNearbyAction(candidates){
+  const manual=candidates.filter(a=>a.manual);
+  if(movementRequested())manualSelectionPinned=false;
+  const selected=manualSelectionPinned&&manual.find(a=>a.id===selectedDefenseActionId);
+  const nearest=candidates[0];
+  const candidate=selected||(nearest?.id.startsWith('upgrade:')?nearest:manual[0]||nearest)||null;
+  selectedDefenseActionId=candidate?.manual?candidate.id:null;
+  if(!selectedDefenseActionId)manualSelectionPinned=false;
+  return candidate;
+}
+function confirmDefenseUpgrade(){
+  if(!running||paused||phase!=="day"||actionLatched)return false;
+  const a=actionCandidates().find(a=>a.manual&&a.id===selectedDefenseActionId);
+  if(!a||a.available===false||!canAfford(a.cost))return false;
+  resetInput();
+  if(!a.apply())return false;
+  actionLatched=true;actionTime=0;defenseActionConsumed=true;
+  lastReceipt=`消費：${costWords(a.cost)}`;receiptUntil=gameElapsed+4;
+  haptic(20);saveRun();updateDwell(0);return true;
+}
+function updateManualTarget(){
+  const a=actionFocus,visible=running&&!paused&&phase==="day"&&a?.manual&&actionCandidates().some(c=>c.id===a.id);
+  if(!manualTargetOutline&&visible){
+    manualTargetOutline=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)),new THREE.LineBasicMaterial({color:0xffdd78,depthTest:false}));
+    manualTargetOutline.renderOrder=30;scene.add(manualTargetOutline);
+  }
+  if(!manualTargetOutline)return;manualTargetOutline.visible=!!visible;
+  if(visible){const f=defenseFootprint("wall",a.x,a.z);manualTargetOutline.position.set(a.x,.61,a.z);manualTargetOutline.scale.set(f.width+.3,.1,f.depth+.3);}
+}
+function updateManualControls(candidates,candidate){
+  const choices=$("defenseChoices"),button=$("confirmDefense"),manual=candidates.filter(a=>a.manual);
+  choices.hidden=!candidate?.manual||manual.length<2;button.hidden=!candidate?.manual;
+  if(!candidate?.manual)return;
+  const signature=manual.map(a=>a.id+a.title).join('|')+selectedDefenseActionId;
+  if(choices._signature!==signature){
+    choices._signature=signature;for(const child of [...choices.children])child.remove();
+    for(const a of manual){const b=document.createElement('button');b.type='button';b.textContent=(a.z<0?'北':'南')+(a.x===0?'':a.x<0?'西':'東')+'の'+typeName('wall',a.x,a.z);b.setAttribute('aria-pressed',String(a.id===selectedDefenseActionId));b.onclick=()=>{resetInput();selectedDefenseActionId=a.id;manualSelectionPinned=true;actionLatched=false;actionTime=0;updateDwell(0);updateManualTarget();};choices.appendChild(b);}
+  }
+  button.textContent=actionLatched?'強化しました':candidate.available===false?'最大レベル':!canAfford(candidate.cost)?'資材不足':'強化する';
+  button.disabled=actionLatched||candidate.available===false||!canAfford(candidate.cost);
+}
 function updateDwell(dt) {
-  const candidate = actionCandidates()[0] || null;
+  const candidates=actionCandidates(),candidate = chooseNearbyAction(candidates);
   if (movementRequested()) {
     actionTime = 0;
     actionLatched = false;
   }
   if (actionFocus?.id !== candidate?.id) {
     actionTime = 0;
+    if(candidate?.manual)actionLatched=false;
   }
   actionFocus = candidate;
   const panel = $("actionPanel");
-  panel.hidden = !candidate || actionLatched;
+  panel.hidden = !candidate || (actionLatched&&!candidate.manual);
+  updateManualControls(candidates,candidate);
   if (!candidate) return;
   $("actionTitle").textContent =
-    actionLatched && lastReceipt ? "届けました" : candidate.title;
+    actionLatched && lastReceipt ? candidate.manual?"強化しました":"届けました" : candidate.title;
   $("actionCost").textContent =
     actionLatched && lastReceipt
       ? lastReceipt
       : costWords(candidate.cost) + " → " + candidate.effect;
   const affordable = canAfford(candidate.cost),
     available = candidate.available !== false;
-  if (!movementRequested() && !actionLatched && affordable && available)
+  if (!candidate.manual && !movementRequested() && !actionLatched && affordable && available)
     actionTime += dt;
   else if (!affordable || !available) actionTime = 0;
-  $("actionHelp").textContent = actionLatched
+  $("actionHelp").textContent = candidate.manual ? (actionLatched?"強化完了。移動して次の準備へ":!available?"この設備は最大レベルです":!affordable?"資材が足りません。通過だけでは消費しません":"金色の枠が対象。ボタンで強化 / 通過は無料") : actionLatched
     ? "少し移動して、次の行動へ"
     : !available
       ? "燃料は十分。減ったらここで補給"
@@ -4605,10 +4671,10 @@ function updateDwell(dt) {
         : movementRequested()
           ? "ここで指を離すと開始"
           : "そのまま待つと確定 / 移動で中断";
-  $("actionTrack").hidden = !available;
+  $("actionTrack").hidden = !available || candidate.manual;
   $("actionFill").style.width =
     Math.min(100, (actionTime / DWELL_SECONDS) * 100) + "%";
-  if (actionTime >= DWELL_SECONDS && !actionLatched) {
+  if (!candidate.manual && actionTime >= DWELL_SECONDS && !actionLatched) {
     if (candidate.apply()) {
       actionLatched = true;
       defenseActionConsumed = true;
@@ -4665,26 +4731,33 @@ function updateJourney(dt) {
       title = '今のうちに集落を修理しよう';
       objectiveTarget = wood < 30 ? nearbyResource('wood') : coal < 5 ? nearbyResource('coal') : {x:0,z:-2.5};
     } else {
-      title = '整備して西側へ戻ろう';
-      const gap=buildPads.find(p=>p.type==='wall'&&p.x===-8&&!p.built&&!p.constructing);
-      objectiveTarget = gap && wood>=15 ? {x:-6.8,z:gap.z} : {x:-5.5,z:0};
+      title = `整備して${nextRaid.direction}側へ戻ろう`;
+      const gap=buildPads.find(p=>p.type==='wall'&&!p.built&&!p.constructing&&p.x*Math.cos(nextRaid.angle)+p.z*Math.sin(nextRaid.angle)>5.5);
+      objectiveTarget = gap && wood>=15 ? {x:gap.x+(Math.abs(gap.x)>=Math.abs(gap.z)?(gap.x<0?1.2:-1.2):0),z:gap.z+(Math.abs(gap.x)<Math.abs(gap.z)?(gap.z<0?1.2:-1.2):0)} : {x:Math.cos(nextRaid.angle)*5.5,z:Math.sin(nextRaid.angle)*5.5};
     }
-    sub = `第2群17体まで ${Math.ceil(nightAssault.remaining)}秒 / 修理は木材30・石炭5`;
+    sub = `${nextAssaultCaption()} / あと${Math.ceil(nightAssault.remaining)}秒`;
   } else {
     const weakFront=[...defenseState].some(([k,st])=>{const [x,,z]=k.split(',').map(Number);return st.type==='wall'&&st.hp<st.maxHp*.5&&x*Math.cos(nextRaid.angle)+z*Math.sin(nextRaid.angle)>5.5;});
+    const brokenFront=buildPads.some(p=>p.type==='wall'&&p.rebuilding&&!p.built&&p.x*Math.cos(nextRaid.angle)+p.z*Math.sin(nextRaid.angle)>5.5);
     const closeEnemy=enemies.some(e=>Math.hypot(e.model.g.position.x,e.model.g.position.z)<6);
-    const earlyFuel=fuel<=80 && (weakFront||closeEnemy);
+    const frontDanger=weakFront||brokenFront||closeEnemy;
+    const earlyFuel=fuel<=80 && frontDanger;
     const needFuel=fuel<45 || earlyFuel;
     title = needFuel ? (coal < 10 ? '石炭不足！ 黒い鉱石を集めよう' : fuel<45 ? '燃料低下！ 炉の左で補給' : '前線が危険！ 先に炉へ補給しよう') : day === 7 ? '竜を炉から引き離そう' : '炉を守り抜こう';
     sub = needFuel ? '炉への攻撃で燃料も減る / 石炭10で補給' : '射撃は自動。敵の近くへ移動して援護';
+    if(frontDanger){
+      if(!needFuel)title=brokenFront?`${nextRaid.direction}の防衛が破られた！ 炉を迎撃で守ろう`:'前線が危険！ 炉に近づく敵を迎撃';
+      sub=needFuel?'炉への攻撃で燃料も減る / 石炭10で補給':'炉への攻撃で燃料も減る / 補給済みでも迎撃を';
+    }
     if(needFuel)objectiveTarget=coal>=10?{x:-1.8,z:0}:nearbyResource('coal');
-    if(nightAssault?.mode==='first')sub='撃退後12秒で第2群17体 / 補給・修理の時間';
+    if(nightAssault&&!frontDanger&&!needFuel)sub=nightAssault.reserve>0?`撃退後${assaultPlan().breakSeconds}秒整備 → ${nextAssaultCaption()}`:`${assaultIndex()+1}群で最後 · ${assaultForecast()}`;
 
   }
   $("gestureGuide").hidden = !running || introStep !== 2;
   $("gestureGuide").style.animationPlayState = settings.motion ? "running" : "paused";
   $("gameViewport").setAttribute("data-motion", String(settings.motion));
   $("gameViewport").setAttribute("data-assault", phase==='night' ? nightAssault?.mode || '' : '');
+  $("gameViewport").setAttribute("data-fuel-warning", phase==='night' && sub.includes('炉への攻撃') ? 'true' : 'false');
   $("journeyTitle").textContent = title;
   $("journeySub").textContent = sub;
   if (guideRing) {
@@ -4731,7 +4804,8 @@ function nearbyResource(type) {
   return target;
 }
 function preparationAdvice() {
-  const raid=`${nextRaid.direction}${currentStage===3?'＋反対側':''}から ${RAID_TYPES[nextRaid.kind][0]}`;
+  const plan=nightAssaultPlan();
+  const raid=plan ? `${plan.groups.join('＋')}体 · ${assaultForecast()}${plan.groups.length>1?' / 群間'+plan.breakSeconds+'秒':''}` : `${nextRaid.direction}${currentStage===3?'＋反対側':''}から ${RAID_TYPES[nextRaid.kind][0]}`;
   if(baseHP < baseMax*.9){
     const missing=wood<30?'wood':coal<5?'coal':null;
     return {title:`集落の耐久 ${Math.ceil(baseHP/baseMax*100)}% → 修理を優先`,
@@ -4778,6 +4852,9 @@ const front=buildPads.filter(p=>p.type==='turret' && p.x*Math.cos(nextRaid.angle
   return {title:'襲撃の側で迎え撃とう',sub:raid+' / 門で止め、見張り台で攻撃',target:null};
 }
 function updateWaypoint() {
+  const tracked = outposts.find(o => o.type === trackedOutpost);
+  if (tracked && Math.hypot(tracked.x-pPos.x,tracked.z-pPos.z)<2.4) trackedOutpost=null;
+  else if (tracked && running && fuel > 45 && objectiveTarget?.x !== -1.8) objectiveTarget = {x:tracked.x,z:tracked.z};
   updateEdgeCues();
   const el = $("waypoint");
   el.hidden = !objectiveTarget || !running || constructionSites.length > 0;
@@ -4801,7 +4878,7 @@ function updateWaypoint() {
 }
 function endExperience() {
   runActive = false;
-  for (const id of ["furnaceDirection", "raidDirection", "gestureGuide"]) $(id).hidden = true;
+    for (const id of ["furnaceDirection", "raidDirection", "flankDirection", "gestureGuide"]) $(id).hidden = true;
   clearRun();
   for (const id of ["fuelStation", "baseStation", "repairStation"])
     $(id).hidden = true;
@@ -4837,7 +4914,7 @@ function readSettings() {
 }
 function applySettings() {
   if (musicGain) musicGain.gain.value = settings.ambience;
-  if (masterGain) masterGain.gain.value = 0.22 * settings.sound;
+  if (masterGain) masterGain.gain.value = settings.sound;
   if (ambientGain) ambientGain.gain.value = 0.015 * settings.ambience;
 }
 function haptic(ms) {
@@ -4856,6 +4933,8 @@ function snapshotRun() {
     savedAt: Date.now(),
     stage: currentStage,
     nightAssault: nightAssault ? { ...nightAssault } : null,
+    bossFlank: bossFlank ? { ...bossFlank } : null,
+      campPlan,
     state: {
       wood,
       coal,
@@ -4913,6 +4992,7 @@ function snapshotRun() {
       captured: o.captured,
       hp: o.hp,
       rewardClaimed: !!o.rewardClaimed,
+      everCaptured: !!o.everCaptured,
       prodT: o.prodT,
     })),
     workers: workerObjs.map((w) => ({
@@ -4973,15 +5053,30 @@ function validRun(s) {
     !pos(s.p)
   )
     return false;
-  if (s.nightAssault != null) {
-    const a = s.nightAssault;
-    if (s.stage !== 1 || nums.day !== 5 || nums.phase !== 'night' ||
-        !['first','break','second'].includes(a.mode) || a.reserve !== 17 ||
-        !finite(a.remaining,0,12) ||
-        (a.mode === 'first' && nums.waveLeft < 17) ||
-        (a.mode === 'break' && (nums.waveLeft !== 17 || !Array.isArray(s.enemies) || s.enemies.length !== 0)) ||
-        (a.mode === 'second' && nums.waveLeft > 17)) return false;
+  if (s.campPlan != null && !["none","supply","guard"].includes(s.campPlan)) return false;
+  if (s.bossFlank != null) {
+    const f=s.bossFlank;
+    if(s.stage!==3 || nums.day!==7 || nums.phase!=='night' ||
+      ![0,2,4].includes(f.reserve) || !finite(f.wait,-1,1.6) ||
+      typeof f.bossSpawned!=='boolean' || nums.waveLeft<f.reserve ||
+      (!f.bossSpawned && (f.reserve!==4 || f.wait!==-1 || nums.waveLeft<5))) return false;
   }
+  if (s.nightAssault != null) {
+    const a=s.nightAssault, modern=a.version===2;
+    const plan=nightAssaultPlan(s.stage, nums.day, !modern);
+    if(!plan || nums.phase!=='night' || (a.version!=null&&!modern) || !['first','break','second'].includes(a.mode))return false;
+    const index=modern?a.index:(a.mode==='second'?1:0);
+    if(!Number.isInteger(index)||index<0||index>=plan.groups.length||
+      (modern&&((a.mode==='first'&&index!==0)||(a.mode==='second'&&index===0))))return false;
+    const reserve=plan.groups.slice(index+1).reduce((x,y)=>x+y,0);
+    // Older two-group saves stored the original second-group count even after it started.
+    const expectedReserve=!modern?plan.reserve:reserve;
+    if(a.reserve!==expectedReserve || !finite(a.remaining,0,plan.breakSeconds) ||
+      nums.waveLeft<reserve || nums.waveLeft>reserve+plan.groups[index] ||
+      !Array.isArray(s.enemies) || s.enemies.length+nums.waveLeft-reserve>plan.groups[index] ||
+      (a.mode==='break'&&(index>=plan.groups.length-1||nums.waveLeft!==reserve||!Array.isArray(s.enemies)||s.enemies.length!==0)))return false;
+  }
+
   for (const k of [
     "wood",
     "coal",
@@ -5110,6 +5205,7 @@ function validRun(s) {
     !s.outposts.every(
       (o) =>
         typeof o.captured === "boolean" &&
+        (o.everCaptured === undefined || typeof o.everCaptured === "boolean") &&
         finite(o.hp, 0, 240) &&
         finite(o.prodT, -1, 10),
     )
@@ -5168,7 +5264,7 @@ function validRun(s) {
     s.upgrades &&
     (!Array.isArray(s.upgrades) ||
       s.upgrades.length !== 3 ||
-      !s.upgrades.every((i) => Number.isInteger(i) && i >= 0 && i <= 6))
+      !s.upgrades.every((i) => Number.isInteger(i) && i >= 0 && i <= 8))
   )
     return false;
   return true;
@@ -5239,8 +5335,12 @@ function resumeRun() {
       comboT,
     } = s.state);
     nextRaid = s.nextRaid;
-    // Old saves keep their original encounter; new Day5 starts opt into two groups.
+    // Preserve already active unsplit battles; new nights use the shared squad schedule.
     nightAssault = s.nightAssault ? { ...s.nightAssault } : null;
+    if(nightAssault && nightAssault.version!==2){nightAssault.index=assaultIndex();nightAssault.version=2;if(nightAssault.mode==='second')nightAssault.reserve=0;}
+    bossFlank = s.bossFlank ? { ...s.bossFlank } : null;
+      campPlan = s.campPlan || "none"; dawnScene=null; trackedOutpost=null; outpostNotice=null;
+      $("dawnPanel").hidden=true;
     blocks = new Map(s.blocks);
     defenseState.clear();
     s.pads.forEach((v, i) => Object.assign(buildPads[i], v));
@@ -5373,6 +5473,7 @@ function unpauseGame() {
   audioCtx?.resume();
 }
 function returnToTitle() {
+  dawnScene=null; $("dawnPanel").hidden=true;
   saveRun();
   paused = false;
   running = false;
@@ -5442,15 +5543,62 @@ function bindSessionUI() {
 // game system — v12, integrated from the deployed v11.
 
 // The unspawned reserve stays in waveLeft, so total enemies and completion stay truthful.
+let bossFlank = null;
+function queueBossFlank() {
+  if(bossFlank?.reserve>0 && bossFlank.bossSpawned && bossFlank.wait<0) {
+    bossFlank.wait=1.6;
+    sfx('wave');
+  }
+}
+function updateBossFlank(dt) {
+  const f=bossFlank;
+  if(!f || !f.bossSpawned || f.reserve<=0)return;
+  if(!enemies.some(e=>e.kind==='boss' && e.hp>0) && f.wait<0)queueBossFlank();
+  if(f.wait<0)return;
+  f.wait=Math.max(0,f.wait-dt);
+  if(f.wait>0)return;
+  const a=(nextRaid?.angle||0)+Math.PI,r=R_INNER-1.2;
+  for(const offset of [-.08,.08]) {
+    spawnEnemy(Math.round(Math.cos(a+offset)*r),Math.round(Math.sin(a+offset)*r),offset<0?'breaker':'raider');
+    enemies.at(-1).targetOutpost=null;
+    waveLeft--;f.reserve--;
+  }
+  f.wait=-1;
+}
+function nightAssaultPlan(stage = currentStage, night = day, legacy = false) {
+  if (night === 7) return null; // Boss breath/flank timing remains independent.
+  if (legacy && !(stage === 1 && night === 5) && !(stage === 2 && night === 4)) return null;
+  const total = nightEnemyCountForStage(night, stage);
+  // Preserve the already tuned Night5 encounter once, without a second scheduler.
+  const groups = stage === 1 && night === 5 ? [18,17] : (() => {
+    const n = Math.ceil(total / 16), small = Math.floor(total / n), extra = total % n;
+    return Array.from({length:n}, (_,i) => small + (i < extra ? 1 : 0));
+  })();
+  return {groups, first:groups[0], reserve:total-groups[0], breakSeconds:stage===1&&night===5?12:6};
+}
+function assaultIndex(a = nightAssault) { return a?.version === 2 ? a.index : a?.mode === 'second' ? 1 : 0; }
+function assaultPlan(a = nightAssault) { return nightAssaultPlan(currentStage, day, a?.version !== 2); }
+function assaultForecast() {
+  const kinds = day < 3 ? (nextRaid.kind==='wolf'?'狼中心':'狼・襲撃者')
+    : nextRaid.kind==='armored'?'鎧中心':nextRaid.kind==='wolf'?'狼中心'
+    : nextRaid.kind==='siege'?'破城中心':day>=4?'鎧・投石・破城':'鎧・破城';
+  return `${nextRaid.direction}${currentStage===3?'＋反対側':''} / ${kinds}`;
+}
+function nextAssaultCaption() {
+  const plan=assaultPlan(), index=assaultIndex()+1;
+  return index<plan.groups.length ? `第${index+1}群${plan.groups[index]}体 · ${assaultForecast()}` : `最終群 · ${assaultForecast()}`;
+}
+
 function beginNightAssault() {
-  nightAssault = currentStage === 1 && day === 5
-    ? { mode: 'first', reserve: 17, remaining: 12 }
-    : null;
+  bossFlank=currentStage===3 && day===7 ? {reserve:4,wait:-1,bossSpawned:false} : null;
+  const plan = nightAssaultPlan();
+  nightAssault = plan ? { version: 2, index: 0, mode: 'first', reserve: plan.reserve, remaining: plan.breakSeconds } : null;
 }
 function nightSpawnAllowance() {
+  if(bossFlank) return bossFlank.bossSpawned ? 0 : Math.max(0,waveLeft-5) || (waveLeft===5 ? 1 : 0);
   if (!nightAssault) return waveLeft;
   if (nightAssault.mode === 'break') return 0;
-  return nightAssault.mode === 'first' ? Math.max(0, waveLeft - nightAssault.reserve) : waveLeft;
+  return Math.max(0, waveLeft - nightAssault.reserve);
 }
 function inNightRespite() {
   return phase === 'night' && nightAssault?.mode === 'break';
@@ -5460,20 +5608,21 @@ function canRepairCamp() {
 }
 function updateNightAssault(dt) {
   if (!nightAssault) return;
-  if (nightAssault.mode === 'first' && waveLeft === nightAssault.reserve && enemies.length === 0) {
+  const plan=assaultPlan(), index=assaultIndex();
+  if (nightAssault.mode !== 'break' && index < plan.groups.length-1 && waveLeft === nightAssault.reserve && enemies.length === 0) {
     nightAssault.mode = 'break';
-    nightAssault.remaining = 12;
-    showWaveBanner('第1群を撃退', '12秒後に第2群17体 / 炉へ補給・集落を修理');
-    sfx('complete');
-    saveRun();
+    nightAssault.remaining = plan.breakSeconds;
+    showWaveBanner(`第${index+1}群を撃退`, `${nextAssaultCaption()} / ${plan.breakSeconds}秒で補給・修理`);
+    sfx('complete'); saveRun();
   } else if (nightAssault.mode === 'break') {
     nightAssault.remaining = Math.max(0, nightAssault.remaining - dt);
     if (nightAssault.remaining === 0) {
+      if(nightAssault.version===2)nightAssault.index=index+1;
       nightAssault.mode = 'second';
+      nightAssault.reserve = plan.groups.slice(index+2).reduce((a,b)=>a+b,0);
       spawnT = 0;
-      showWaveBanner('第2群 接近', `${nextRaid.direction}から17体 / 炉を守ろう`);
-      sfx('wave');
-      saveRun();
+      showWaveBanner(`第${index+2}群 接近`, `${plan.groups[index+1]}体 · ${assaultForecast()}`);
+      sfx('wave'); saveRun();
     }
   }
 }
@@ -5502,7 +5651,7 @@ function update(dt, t) {
       sfx(day === 7 ? "boss" : "wave");
       showWaveBanner(
         day === 7 ? "☠️ FINAL NIGHT" : "🌙 NIGHT " + day,
-        day === 7 ? "巨大ボス襲来" : nightAssault ? '第1群18体 → 整備12秒 → 第2群17体' : nm[0] + " / " + nm[1],
+        day === 7 ? "巨大ボス襲来" : nightAssault ? `${nightAssaultPlan().groups.join('＋')}体 · ${assaultForecast()}${nightAssaultPlan().groups.length>1?' / 群間'+nightAssaultPlan().breakSeconds+'秒整備':''}` : nm[0] + " / " + nm[1],
       );
       toast("🌙 第" + day + "夜 — 襲撃開始!");
     }
@@ -5514,6 +5663,7 @@ function update(dt, t) {
       (nightModifier === "fuel" ? 1.7 : 1) *
       dt;
     updateNightAssault(dt);
+    updateBossFlank(dt);
     if (nightSpawnAllowance() > 0) {
       spawnT -= dt;
       if (spawnT <= 0) {
@@ -5546,7 +5696,7 @@ function update(dt, t) {
   updateJourney(dt);
   updateObjective();
   if (fuel <= 0 || baseHP <= 0) gameOver(fuel <= 0);
-  else if (day === 7 && waveLeft === 0 && bossDefeated) winGame();
+  else if (day === 7 && waveLeft === 0 && bossDefeated && (!bossFlank || enemies.length===0)) winGame();
 }
 
 function winGame() {
@@ -5573,7 +5723,8 @@ function rewardIcon(kind){
   return `<svg class="rewardIcon" viewBox="0 0 32 32" aria-hidden="true" fill="#345663" stroke="#e5bc78" stroke-width="2" stroke-linejoin="round">${paths[kind]||paths.supply}</svg>`;
 }
 
-function showUpgrade(savedPicks = null) {
+function showUpgradeCards(savedPicks = null) {
+  $("hud").classList.remove("hidden");
   upgrading = true;
   running = false;
   $("combo").hidden=true;
@@ -5633,8 +5784,11 @@ function showUpgrade(savedPicks = null) {
       apply: () => (baseHP = baseMax),
     },
   ];
-  const indices =
-    savedPicks || [...pool.keys()].sort(() => Math.random() - 0.5).slice(0, 3);
+  pool.push(
+    {icon:"supply",name:"遠征の輸送路",desc:"確保した資源拠点が夜も生産 / 守る範囲が広がる",apply:()=>{campPlan="supply";}},
+    {icon:"fort",name:"本陣の迎撃指示",desc:"矢塔は射程内の破城兵・投擲兵を優先 / 狼への射撃は後回し",apply:()=>{campPlan="guard";}}
+  );
+  const indices = savedPicks || chooseCampRewards();
   activeUpgradePicks = indices;
   const picks = indices.map((i) => pool[i]),
     wrap = $("upgradeCards");
@@ -5645,6 +5799,7 @@ function showUpgrade(savedPicks = null) {
     b.innerHTML = `${rewardIcon(u.icon)}<b>${u.name}</b><span>${u.desc}</span>`;
     b.onclick = () => {
       u.apply();
+        dawnScene = null; $("dawnPanel").hidden=true;
       defenseState.forEach((st, k) => {
         const [x, y, z] = k.split(",").map(Number),
           blk = blockAt(x, y, z);
@@ -5653,6 +5808,7 @@ function showUpgrade(savedPicks = null) {
       });
       $("upgrade").classList.add("hidden");
       nightAssault = null;
+      bossFlank = null;
       day++;
       phase = "day";
       phaseT = 40;
@@ -5666,6 +5822,7 @@ function showUpgrade(savedPicks = null) {
       refreshBaseVisual();
       ensureWorkers();
       running = true;
+      $("journey").hidden=false;
       saveRun();
       updateHUD();
       const advice = preparationAdvice();
@@ -5686,12 +5843,16 @@ function gameOver(froze) {
   const breached = enemies.some(
     (e) => Math.hypot(e.model.g.position.x, e.model.g.position.z) < 3,
   );
+  const lostFront = buildPads.some(p => p.type === 'wall' && p.rebuilding && !p.built &&
+    p.x * Math.cos(nextRaid.angle) + p.z * Math.sin(nextRaid.angle) > 5.5);
   $("resultInsight").textContent = froze
     ? breached && baseHP < baseMax
       ? "敵が炉へ到達し、耐久と燃料が削られました。予告の方角へ柵を置き、見張り台の射程内で足止めしよう。"
       : coal >= 10
         ? "石炭は残っていました。燃料が45%になったら炉の左へ戻り、止まって補給しよう。"
         : "石炭が足りませんでした。昼に黒い鉱石を集め、次の夜へ20以上持ち越そう。"
+    : lostFront
+      ? `${nextRaid.direction}の門・防壁が壊されました。昼に建て直して強化し、見張り台の射程内で足止めしよう。`
     : defenseState.size < 2
       ? "守りが薄い方向から突破されました。襲撃予告の側へ見張り台と木柵を増やそう。"
       : "防衛線が押し切られました。見張り台を強化し、敵の群れに近づいて援護しよう。";
@@ -5707,7 +5868,10 @@ function gameOver(froze) {
 }
 
 function startGame(stage = currentStage) {
+    dawnScene = null; campPlan = "none"; trackedOutpost = null; outpostNotice = null;
+    $("dawnPanel").hidden=true;
   nightAssault = null;
+  bossFlank = null;
   if (!Number.isInteger(stage) || stage < 1 || stage > unlockedStage())
     return false;
   currentStage = stage;
@@ -5808,9 +5972,100 @@ function startGame(stage = currentStage) {
 }
 
 // Introductory nights only. Later waves and all enemy statistics are unchanged.
-function nightEnemyCount(n) {
+function nightEnemyCount(n) { return nightEnemyCountForStage(n, currentStage); }
+function nightEnemyCountForStage(n, stage) {
   const baseline = n === 1 ? 6 : n === 2 ? 12 : n === 7 ? 22 : 10 + n * 5;
-  return baseline + (n >= 3 ? (currentStage - 1) * 2 : 0);
+  return baseline + (n >= 3 ? (stage - 1) * 2 : 0);
+}
+
+
+// ---- camp-life ----
+// Bounded camp growth, remote-post awareness and one active expedition/guard plan.
+let campPlan = "none", dawnScene = null, trackedOutpost = null, outpostNotice = null;
+function chooseCampRewards() {
+  const ordinary = [0,1,2,3,4,5,6].sort(()=>Math.random()-.5);
+  return currentStage >= 2 && day === 2 ? [7,8,ordinary[0]] : ordinary.slice(0,3);
+}
+function defenseTargetScore(enemy, distance) {
+  return distance - (campPlan === "guard" && ["breaker","thrower"].includes(enemy.kind) ? 100 : 0);
+}
+function showUpgrade(savedPicks = null) {
+  if (savedPicks) { dawnScene=null; $("dawnPanel").hidden=true; return showUpgradeCards(savedPicks); }
+  if (dawnScene) return;
+  upgrading=true; running=false; activeUpgradePicks=chooseCampRewards(); resetInput();
+  for(const id of ["raidDirection","furnaceDirection","waypoint"]) $(id).hidden=true;
+  if(guideRing)guideRing.visible=false;
+  $("hud").classList.add("hidden");
+  $("combo").hidden=true; $("actionPanel").hidden=true; $("journey").hidden=true;
+  $("waveBanner").classList.remove("show"); $("toast").style.opacity=0;
+  $("dawnPanel").hidden=false; $("dawnNight").textContent=`第${day}夜 防衛成功`;
+  $("dawnTitle").textContent="灯のもとへ、おかえり。";
+  $("dawnDetail").textContent=`守った設備 ${defenseState.size} / 炉の耐久 ${Math.ceil(baseHP/baseMax*100)}%`;
+  dawnScene={t:0,from:camera.position.clone(),look:camLook.clone(),night:nightK,revealed:false};
+  saveRun();
+}
+function updateDawnScene(dt) {
+  const s=dawnScene;if(!s)return;s.t+=dt;
+  const q=Math.min(1,Math.max(0,s.t-.35)/(settings.motion?1.45:.45));
+  if(s.t>=.35&&!s.revealed){
+    s.revealed=true; const old=settlementObjs.length; updateCampVisual(day+1);
+    s.newHomes=settlementObjs.slice(old); sfx("complete");
+    $("dawnTitle").textContent=settlementObjs.length>old?"守った夜が、暮らしになる。":"この集落で、次の朝を。";
+    $("dawnDetail").textContent=settlementObjs.length>old?`住居が ${old} → ${settlementObjs.length}棟へ。次の夜に備えよう`:`${defenseState.size}の設備と灯を守った。強化を選び、傷んだ設備を整えよう`;
+  }
+  nightK=s.night*(1-q);sun.intensity=1.3-nightK*1.02;hemi.intensity=1.1-nightK*.72;
+  if(settings.motion){camera.position.lerpVectors(s.from,new THREE.Vector3(12,20,23),q*q*(3-2*q));camera.lookAt(s.look.x*(1-q),0,s.look.z*(1-q));for(const g of s.newHomes||[])g.scale.setScalar(.2+.8*q);}
+  updateParticles(dt);
+  if(s.t>2.25)finishDawnScene();
+}
+function finishDawnScene(){
+  if(!dawnScene)return;
+  for(const g of dawnScene.newHomes||[])g.scale.setScalar(1);
+  dawnScene=null;$("dawnPanel").hidden=true;showUpgradeCards(activeUpgradePicks);
+}
+function postThreat(o){return enemies.filter(e=>e.targetOutpost===o&&e.hp>0).length;}
+function postYield(o){return {sawmill:"木材 +6",coalmine:"石炭 +4",ironmine:"鉄 +2",survivor:"住民が加わる",research:"塔と射撃を強化"}[o.type];}
+function postDirection(o){
+  const v=new THREE.Vector3(o.x,.8,o.z).project(camera),a=Math.atan2(v.y,v.x);
+  return ["→","↗","↑","↖","←","↙","↓","↘"][(Math.round(a/(Math.PI/4))+8)%8];
+}
+function updateCampLifeUI(){
+  const card=$("outpostCard");card.hidden=!running||paused||introStep<4;
+  if(card.hidden)return;
+  const ranked=outposts.slice().sort((a,b)=>postThreat(b)-postThreat(a)||Math.hypot(a.x-pPos.x,a.z-pPos.z)-Math.hypot(b.x-pPos.x,b.z-pPos.z));
+  const threatened=ranked.find(o=>o.captured&&postThreat(o)>0),notice=outpostNotice&&outpostNotice.until>gameElapsed?outposts.find(o=>o.type===outpostNotice.type):null;
+  const tracked=outposts.find(o=>o.type===trackedOutpost);
+  const near=ranked.find(o=>Math.hypot(o.x-pPos.x,o.z-pPos.z)<6);
+  const o=threatened||notice||tracked||near||ranked.find(o=>o.captured);
+  if(!o){card.hidden=true;return;}
+  card.style.bottom=`calc(${$("actionPanel").hidden?144:Math.max(144,$("actionPanel").offsetHeight+34)}px + env(safe-area-inset-bottom))`;
+  const i=outpostInfo(o.type),n=postThreat(o),lost=o.everCaptured&&!o.captured&&o.hp<=0;
+  card.dataset.type=o.type;card.dataset.danger=n||lost?"true":"false";
+  $("outpostTitle").textContent=`${postDirection(o)} ${i.name} · ${lost?"陥落":n?`${n}体が接近`:o.captured?"確保中":baseLevel<i.need?`集落Lv.${i.need}で確保`:"そばで離すと確保"}`;
+  $("outpostDetail").textContent=lost?"生産停止 / 昼に戻れば再確保できる":o.captured?`耐久 ${Math.ceil(o.hp/240*100)}% · ${postYield(o)}${["sawmill","coalmine","ironmine"].includes(o.type)?campPlan==="supply"?" / 4.2秒・夜も生産":" / 4.2秒・昼のみ":""}`:`${postYield(o)} / 遠くの拠点にも敵が来る`;
+  $("outpostRoute").textContent=trackedOutpost===o.type?"道案内中 · タップで解除":"タップで道案内 · 炉から離れる判断を";
+}
+function layoutBottomMessages(){
+  const rect=renderer.domElement.getBoundingClientRect(),action=$("actionPanel"),post=$("outpostCard");
+  let bottom=100;
+  for(const el of [action,post])if(!el.hidden)bottom=Math.max(bottom,rect.bottom-el.getBoundingClientRect().top+12);
+  $("toast").style.bottom=bottom+"px";
+}
+function validCampPortrait(value){return typeof value==="string"&&value.length<300000&&/^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value);}
+function saveCampPortrait(){
+  const r=campaign.records.find(r=>r.stage===currentStage);if(!r||!campaignWritable)return;
+  try{
+    renderer.render(scene,camera);const c=document.createElement("canvas");c.width=260;c.height=Math.round(260*renderer.domElement.height/renderer.domElement.width);
+    const ctx=c.getContext("2d"),src=renderer.domElement;ctx.drawImage(src,0,0,src.width,src.height,0,0,c.width,c.height);
+    const data=c.toDataURL("image/webp",.7);if(validCampPortrait(data))r.image=data;
+    window.localStorage.setItem(CAMPAIGN_KEY,JSON.stringify(campaign));
+  }catch{delete r.image;try{window.localStorage.setItem(CAMPAIGN_KEY,JSON.stringify(campaign));}catch{saveMessage="記録を保存できませんでした。";}}
+}
+function renderCampAlbum(record){
+  const show=record&&validCampPortrait(record.image);$("campAlbum").hidden=!show;
+  if(!show)return;
+  $("campPortrait").src=record.image;
+  $("campAlbumText").textContent=`あなたが守った集落 Lv.${record.level} · 設備${record.buildings} · 炉耐久${record.hp} / ${record.plan==="supply"?"遠征の輸送路":record.plan==="guard"?"本陣の迎撃指示":"自由な備え"}`;
 }
 
 
@@ -5847,6 +6102,7 @@ function frame() {
   if (running) update(dt, t);
   if (running) updateParticles(dt);
   else if (victoryScene) updateVictoryScene(dt);
+  else if (dawnScene && !paused) updateDawnScene(dt);
   flushWorld();
   camera.updateMatrixWorld();
   uiTime += dt;
@@ -5854,10 +6110,13 @@ function frame() {
     uiTime = 0;
     updateHUD();
     updateWorldLabels();
+    updateCampLifeUI();
+    layoutBottomMessages();
   }
   projectGroundTags(t);
   if (running) updateWaypoint();
   updateDragonUI();
+  updateManualTarget();
   if (!$('title').classList.contains('hidden')) renderTitleCamp(t);
   else { updateContactShadows(); renderer.render(scene, camera); }
 }
@@ -5865,6 +6124,8 @@ function boot() {
   try {
     loadCampaignProgress();
     bindSessionUI();
+    $("dawnSkip").onclick = finishDawnScene;
+    $("outpostCard").onclick = () => {const type=$("outpostCard").dataset.type;trackedOutpost=trackedOutpost===type?null:type;};
     $("victorySkip").onclick = () => {
       if (victoryScene) {
         victoryScene.t = 10;
@@ -5889,6 +6150,7 @@ function boot() {
     renderer.domElement.setAttribute("aria-label", "移動操作用ゲーム画面");
     renderer.setClearAlpha(1);
     bindInput();
+    $("confirmDefense").onclick=confirmDefenseUpgrade;
     resizeViewport();
     renderer.domElement.addEventListener("webglcontextlost", (e) => {
       e.preventDefault();
