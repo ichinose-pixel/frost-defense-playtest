@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>フロスト・ディフェンス — 灯の集落</title>
-    <link rel="stylesheet" href="styles/game.css?v=26" />
+    <link rel="stylesheet" href="styles/game.css?v=31" />
   </head>
   <body>
     <div id="gameViewport">
@@ -33,10 +33,10 @@
       <button id="victorySkip" hidden>演出をスキップ ›</button>
       <div id="hud" class="hidden">
         <div class="chip resource wood-chip">
-          <small>木材</small><b>🌲 <span id="wood">0</span></b>
+          <small>木材</small><b><i class="pict wood" aria-hidden="true"></i> <span id="wood">0</span></b>
         </div>
         <div class="chip resource coal-chip">
-          <small>石炭</small><b>🪨 <span id="coal">0</span></b>
+          <small>石炭</small><b><i class="pict coal" aria-hidden="true"></i> <span id="coal">0</span></b>
         </div>
         <div class="chip resource iron-chip">
           <small>鉄</small><b>⚙️ <span id="iron">0</span></b>
@@ -51,12 +51,12 @@
           <small>気温</small><b><span id="temp">-10</span><em>℃</em></b>
         </div>
         <div class="chip status" id="fuelChip">
-          <small>燃料</small><b>🔥 <span id="fire">100</span><em>%</em></b
+          <small>燃料</small><b><i class="pict fire" aria-hidden="true"></i> <span id="fire">100</span><em>%</em></b
           ><i class="meter"><i id="fuelMeter"></i></i>
         </div>
         <div class="chip status" id="baseChip">
           <small>集落 Lv.<span id="baseLv">1</span></small
-          ><b>🏰 <span id="base">100</span><em>%</em></b
+          ><b><i class="pict home" aria-hidden="true"></i> <span id="base">100</span><em>%</em></b
           ><i class="meter"><i id="baseMeter"></i></i>
         </div>
         <div id="bossPanel" hidden>
@@ -150,12 +150,12 @@
         <button class="btn" id="retryBtn">もう一度挑戦</button>
       </div>
       <div id="upgrade" class="overlay hidden">
-        <h1>✨ 生存ボーナス</h1>
+        <h1>生存ボーナス</h1>
         <h2>次の夜に備えて1つ強化</h2>
         <div id="upgradeCards"></div>
       </div>
     </div>
     <script src="vendor/three-0.160.0.min.js"></script>
-    <script src="dist/game.js?v=26"></script>
+    <script src="dist/game.js?v=31"></script>
   </body>
 </html>

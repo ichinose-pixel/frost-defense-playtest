@@ -31,6 +31,7 @@ let enemies = [],
   turretObjs = new Map(),
   flameObjs = new Map(),
   warehouseObjs = new Map();
+let nightAssault = null;
 let running = false,
   mode = 0,
   nightK = 0,
@@ -537,22 +538,29 @@ function flushWorld() {
     const parts = resourceVisualParts(e);
     if (parts && spare >= parts.length - 1) {
       spare -= parts.length - 1;
+      // Low young spruce around the working camp; the distant forest keeps its height.
+      // Only render transforms change. Resource cells and yields stay identical.
+      const youngTree=(e.b.t==='wood'||e.b.t==='leaf') && Math.max(Math.abs(e.x),Math.abs(e.z))<16 && !(e.x===-4&&e.z===4);
+      const scale=youngTree?(.64+((Math.abs(e.x*13+e.z*7)%5)*.045)):1;
       for (const [dx, dy, dz, w, h, d, color] of parts) {
-        m.makeScale(w, h, d);
-        m.setPosition(e.x + dx, e.y + dy, e.z + dz);
+        m.makeScale(w*scale, h*scale, d*scale);
+        m.setPosition(e.x + dx*scale, .5+(e.y+dy-.5)*scale, e.z + dz*scale);
         inst.setMatrixAt(count, m);
         c.setHex(color).multiplyScalar(hashJitter(e.x, e.y, e.z));
         inst.geometry.attributes.canopy.setX(count, e.b.t === "leaf" ? 1 : 0);
+          inst.geometry.attributes.canopyAnchor.setXYZ(count,e.x,.5+(e.y-.5)*scale,e.z);
         inst.setColorAt(count++, c);
       }
     } else {
-      m.makeTranslation(e.x, e.y, e.z);
+      inst.geometry.attributes.canopy.setX(count,0);
+        m.makeTranslation(e.x, e.y, e.z);
       inst.setMatrixAt(count, m);
       c.setHex(stageBlockColor(e)).multiplyScalar(e.b.t==='snow'?1:hashJitter(e.x, e.y, e.z));
       inst.setColorAt(count++, c);
     }
   }
   inst.geometry.attributes.canopy.needsUpdate = true;
+  inst.geometry.attributes.canopyAnchor.needsUpdate = true;
   inst.count = count;
   inst.instanceMatrix.needsUpdate = true;
   if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
@@ -585,7 +593,8 @@ function initScene() {
   const geo = new THREE.BoxGeometry(1, 1, 1),
     mat = new THREE.MeshLambertMaterial();
   geo.setAttribute("canopy", new THREE.InstancedBufferAttribute(new Float32Array(12000), 1));
-  installCanopyMaterial(mat);
+  geo.setAttribute("canopyAnchor",new THREE.InstancedBufferAttribute(new Float32Array(12000*3),3));
+    installCanopyMaterial(mat);
   inst = new THREE.InstancedMesh(geo, mat, 12000);
   inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(inst);
@@ -755,10 +764,22 @@ function installCanopyMaterial(mat) {
   mat.onBeforeCompile = shader => {
     shader.uniforms.canopyFocus = canopyFocus;
     shader.uniforms.canopyTarget = canopyTarget;
-    shader.vertexShader = 'attribute float canopy; varying float vCanopy; varying vec2 vScreen;\n' + shader.vertexShader;
-    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvCanopy = canopy; vScreen = gl_Position.xy / gl_Position.w;');
-    shader.fragmentShader = 'uniform vec2 canopyFocus; uniform vec2 canopyTarget; varying float vCanopy; varying vec2 vScreen;\n' + shader.fragmentShader;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vCanopy > 0.5 && min(distance(vScreen, canopyFocus), distance(vScreen, canopyTarget)) < 0.23 && mod(gl_FragCoord.x + 2.0 * gl_FragCoord.y, 4.0) > 0.5) discard;');
+    shader.vertexShader = 'attribute float canopy; attribute vec3 canopyAnchor; uniform vec2 canopyFocus; uniform vec2 canopyTarget;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
+      vec4 mvPosition = vec4(transformed,1.0);
+      #ifdef USE_INSTANCING
+        mvPosition = instanceMatrix * mvPosition;
+      #endif
+      if(canopy > .5){
+        vec4 crownScreen=projectionMatrix*modelViewMatrix*vec4(canopyAnchor,1.0);
+        vec2 crownUV=crownScreen.xy/crownScreen.w;
+        float clearance=min(distance(crownUV,canopyFocus),distance(crownUV,canopyTarget));
+        float openness=smoothstep(.17,.34,clearance);
+        mvPosition.xyz=mix(canopyAnchor,mvPosition.xyz,mix(.06,1.0,openness));
+      }
+      mvPosition=modelViewMatrix*mvPosition;
+      gl_Position=projectionMatrix*mvPosition;
+    `);
   };
 }
 function updateCanopyFocus() {
@@ -1427,7 +1448,78 @@ function resetFeedback() {
 // Shared visual language: glacier blue, deep spruce and warm brass.
 // Scenic meshes never enter the logical world or collision/resource maps.
 let scenicWorld = null;
+let titleCamp=null, titleCamera=null, titleFlame=null, contactShadows=null;
+// Presentation-only copies have their own GPU resources; starting a run may dispose originals.
+function copyTitleModel(model){
+  const copy=model.clone(true);
+  copy.traverse(o=>{if(o.geometry)o.geometry=o.geometry.clone();if(o.material)o.material=Array.isArray(o.material)?o.material.map(m=>m.clone()):o.material.clone();});
+  return copy;
+}
+function contactShadowMaterial(){
+  return new THREE.ShaderMaterial({transparent:true,depthWrite:false,
+    vertexShader:'varying vec2 uvShadow; void main(){uvShadow=uv;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.0);}',
+    fragmentShader:'varying vec2 uvShadow; void main(){float r=length((uvShadow-.5)*2.0);float a=(1.0-smoothstep(.05,1.0,r))*.25;gl_FragColor=vec4(.075,.16,.20,a);}' });
+}
+function updateContactShadows(){
+  if(stageClear||victoryScene)for(const g of turretObjs.values())g.traverse(o=>{if(o.isMesh&&o.material.transparent){o.material.opacity=1;o.material.depthWrite=true;}});
+  if(!contactShadows){contactShadows=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),contactShadowMaterial(),160);contactShadows.frustumCulled=false;scene.add(contactShadows);}
+  const m=new THREE.Object3D();let n=0;
+  const add=(x,z,w,d)=>{if(n>=160)return;m.position.set(x,.525,z);m.rotation.set(-Math.PI/2,0,0);m.scale.set(w,d,1);m.updateMatrix();contactShadows.setMatrixAt(n++,m.matrix);};
+  add(pPos.x,pPos.z,1.55,1.25);
+  for(const [k,s] of defenseState){const [x,,z]=k.split(',').map(Number);const f=defenseFootprint(s.type,x,z);add(x,z,f.width+1,f.depth+1);}
+  for(const e of blockArr)if(e.y===1&&e.b.t==='wood')add(e.x,e.z,2,2);
+  contactShadows.count=n;contactShadows.instanceMatrix.needsUpdate=true;
+}
+function renderTitleCamp(t){
+  if(!titleCamp){
+    titleCamp=new THREE.Scene();titleCamp.background=new THREE.Color(0x173440);
+    titleCamera=new THREE.PerspectiveCamera(36,1,.1,100);
+    titleCamp.add(new THREE.HemisphereLight(0xcce9f2,0x335569,1.25));
+    const light=new THREE.DirectionalLight(0xffe4b6,1.3);light.position.set(-3,8,5);titleCamp.add(light);
+    const ground=box(13,.8,10,0xbfd4d8);ground.position.y=-.02;titleCamp.add(ground);
+    const snow=box(13.2,.15,10.2,0xe5eeea);snow.position.y=.45;titleCamp.add(snow);
+    const tower=makeTurretModel(1);tower.position.set(-2.8,1,-2);titleCamp.add(tower);
+    const gate=makeWallModel(0,6);gate.position.set(2,.5,-1.8);titleCamp.add(gate);
+    const hero=copyTitleModel(player);hero.position.set(-1.7,.5,1.9);hero.rotation.y=.45;titleCamp.add(hero);
+    const hearth=copyTitleModel(fireGroup);hearth.position.set(1,0,1);hearth.scale.setScalar(1.3);hearth.traverse(o=>{if(o.isPointLight)o.intensity=5;});titleCamp.add(hearth);
+    titleFlame=new THREE.Group();titleFlame.position.set(1,1.1,1);
+    for(const [w,h,c,y] of [[.85,1.1,0xf28b3c,.2],[.55,.95,0xffc66a,.53],[.28,.65,0xffebac,.78]]){
+      const flame=new THREE.Mesh(new THREE.ConeGeometry(w*.65,h,4),new THREE.MeshBasicMaterial({color:c}));flame.position.y=y;titleFlame.add(flame);
+    }titleCamp.add(titleFlame);
+    for(const [x,z,s] of [[-4.6,-2.9,.85],[4.8,-3,.6],[-4.6,1.3,.45]]){
+      const trunk=box(.4,2*s,.4,0x92623e);trunk.position.set(x,.5+s,z);titleCamp.add(trunk);
+      for(let j=0;j<3;j++){const w=(2.5-j*.7)*s,leaf=box(w,.65*s,w,0x315f68),cap=box(w,.16*s,w,0xe4f0ec);leaf.position.set(x,1.8*s+j*.6*s+.5,z);cap.position.copy(leaf.position);cap.position.y+=.36*s;titleCamp.add(leaf,cap);}
+    }
+    const shadows=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),contactShadowMaterial(),4),o=new THREE.Object3D();
+    [[-2.8,-2,3],[2,-1.8,4],[-1.7,1.9,1.8],[1,1,2.8]].forEach(([x,z,s],i)=>{o.position.set(x,.535,z);o.rotation.x=-Math.PI/2;o.scale.set(s,s,1);o.updateMatrix();shadows.setMatrixAt(i,o.matrix);});titleCamp.add(shadows);
+  }
+  titleCamera.aspect=camera.aspect;titleCamera.position.set(12,15,23);titleCamera.lookAt(0,.6,0);
+  if(camera.aspect>1.2){const size=renderer.getSize(new THREE.Vector2());titleCamera.setViewOffset(size.x,size.y,size.x*.22,0,size.x,size.y);}else titleCamera.clearViewOffset();
+  titleCamera.updateProjectionMatrix();
+  titleFlame.scale.y=settings.motion?1+Math.sin(t*4)*.07:1;
+  renderer.render(titleCamp,titleCamera);
+}
 let wallConnectionMesh = null;
+let defenseRangeRing=null, defenseNextRing=null;
+function updateDefenseRange() {
+  const focus=actionFocus;
+  let level=0,x=0,z=0;
+  if(running && !paused && !actionLatched && phase==='day' && introStep>=3 && focus?.id.startsWith('upgrade:')){
+    const st=defenseState.get(focus.id.slice(8));
+    if(st?.type==='turret'){level=st.level;x=focus.x;z=focus.z;}
+  }
+  if(!defenseRangeRing && level){
+    defenseRangeRing=makeRing(1,0x8ee6e2,.65);defenseNextRing=makeRing(1,0xffd082,.42);
+    for(const ring of [defenseRangeRing,defenseNextRing]){ring.geometry.dispose();ring.geometry=new THREE.RingGeometry(.993,1,80);}
+    scene.add(defenseRangeRing,defenseNextRing);
+  }
+  if(!defenseRangeRing)return;
+  defenseRangeRing.visible=level>0;defenseNextRing.visible=level>0 && level<MAX_DEF_LV && !actionLatched;
+  if(level){
+    defenseRangeRing.position.set(x,.6,z);defenseRangeRing.scale.setScalar(turretRange(level));
+    defenseNextRing.position.set(x,.6,z);defenseNextRing.scale.setScalar(turretRange(level+1));
+  }
+}
 function wallLinks(){
   const links=[];
   for(const [k,st] of defenseState){
@@ -1545,6 +1637,16 @@ function celebrateBuild(p) {
   sfx('complete');haptic(24);
 }
 function updatePresentation(dt) {
+  updateDefenseRange();
+  for(const g of turretObjs.values()){
+    const dx=g.position.x-pPos.x,dz=g.position.z-pPos.z;
+    const hidesPlayer=Math.hypot(dx,dz)<3 && dx*(camera.position.x-pPos.x)+dz*(camera.position.z-pPos.z)>0;
+    for(const roof of g.children.filter(o=>o.isMesh&&o.position.y>=2.25)){
+      roof.material.transparent=true;
+      roof.material.opacity+=( (hidesPlayer?.25:1)-roof.material.opacity)*Math.min(1,dt*12);
+      roof.material.depthWrite=roof.material.opacity>.98;
+    }
+  }
   for(let i=arrivalModels.length-1;i>=0;i--){
     const a=arrivalModels[i];a.age+=dt;
     const q=Math.min(1,a.age/.48),bounce=settings.motion?Math.sin(q*Math.PI*2)*Math.exp(-q*4)*.18:0;
@@ -1568,6 +1670,8 @@ function updatePresentation(dt) {
   }
 }
 function resetPresentation(){
+  for(const g of turretObjs.values())g.traverse(o=>{if(o.isMesh&&o.material.transparent){o.material.opacity=1;o.material.depthWrite=true;}});
+  if(defenseRangeRing){defenseRangeRing.visible=false;defenseNextRing.visible=false;}
   if(wallConnectionMesh)wallConnectionMesh.count=0;
   impactRings.forEach(a=>disposeObject(a.ring));impactRings.length=0;
   arrivalModels.forEach(a=>a.g.scale.copy(a.scale));arrivalModels.length=0;
@@ -1585,8 +1689,8 @@ function updateIntroGuide(){
   }
   const close=objectiveTarget&&Math.hypot(pPos.x-objectiveTarget.x,pPos.z-objectiveTarget.z)<1.4;
   const assembling=constructionSites.some(s=>s.p.type==='turret');
-  const titles=['木に向かって歩こう',assembling?'見張り台を組み立て中':close?'ここで指を離そう':'光る床まで歩こう','炉のそばへ戻ろう'];
-  const notes=['画面のどこでも、指を滑らせて移動','止まると木材40を届けて建築','これで準備完了。最初の夜を迎えよう'];
+  const titles=['木に近づこう',assembling?'組み立て中':close?'指を離して建築':'光る床へ','炉へ戻ろう'];
+  const notes=['指を滑らせて移動','木材40を届ける','最初の夜を迎えよう'];
   $('introNumber').textContent=`${step+1} / 3`;
   $('introTitle').textContent=gameElapsed<guideCelebrateUntil?(step===1?'採集できた！':'見張り台が完成！'):titles[step];
   $('introHelp').textContent=notes[step];
@@ -2173,13 +2277,17 @@ function addWallDecor(x, y, z, level = 1) {
     disposeObject(wallDecorObjs.get(k));
     wallDecorObjs.delete(k);
   }
-  const g = new THREE.Group();
+    const g = makeWallModel(x,z,level);
+    g.position.set(x,y-.5,z);scene.add(g);wallDecorObjs.set(k,g);
+}
+function makeWallModel(x,z,level=1) {
+    const g = new THREE.Group();
   // Local X follows the wall. Two hinged doors form a readable, player-only passage.
   if(Math.abs(x)>=Math.abs(z))g.rotation.y=Math.PI/2;
   if(!isGateWall(x,z)){
     for(let i=-4;i<=4;i++){const post=box(.32,1.65,.38,0x866d51);post.position.set(i*.44,.85,0);g.add(post);const snow=box(.36,.15,.45,0xe0ece7);snow.position.set(i*.44,1.75,0);g.add(snow);}
     for(const height of [.55,1.2]){const rail=box(4,.15,.48,0x375864);rail.position.y=height;g.add(rail);}
-    g.position.set(x,y-.5,z);scene.add(g);wallDecorObjs.set(k,g);return;
+      return g;
   }
   for(const side of [-1,1]){
     const post=box(.36,2.05,.5,0x42636a);post.position.set(side*1.15,1,0);g.add(post);
@@ -2193,7 +2301,7 @@ function addWallDecor(x, y, z, level = 1) {
   }
   const arch=box(2.7,.28,.58,0x395964);arch.position.y=2.26;g.add(arch);
   const light=box(.42,.34,.15,0xffcd79);light.position.set(0,2.3,.36);g.add(light);
-  g.position.set(x,y-.5,z);scene.add(g);wallDecorObjs.set(k,g);
+    return g;
 }
 
 function addFlameVisual(x, y, z, level = 1) {
@@ -2254,52 +2362,37 @@ function addWarehouseVisual(x, y, z, level = 1) {
 }
 
 function addTurretVisual(x, y, z, level = 1) {
-  const k = key(x, y, z);
-  if (turretObjs.has(k)) disposeObject(turretObjs.get(k));
-  const g = new THREE.Group(),
-    pole = box(0.22, 1.05, 0.22, level >= 3 ? 0x7b8ca2 : 0x586c80);
-  pole.position.y = 1.02;
-  g.add(pole);
-  addVoxelDetails(g, [
-    [0.6, 0.14, 0.6, level >= 2 ? 0x95aac0 : 0x7f94a8, 0, 1.55, 0],
-    [0.74, 0.12, 0.18, 0xaebed0, 0, 1.68, 0],
-    [0.18, 0.12, 0.74, 0xaebed0, 0, 1.68, 0],
-    [0.14, 0.5, 0.14, 0x3d2b1d, -0.22, 1.94, 0],
-    [0.14, 0.5, 0.14, 0x3d2b1d, 0.22, 1.94, 0],
-    [0.52, 0.08, 0.08, level >= 2 ? 0xffde89 : 0xe5bf76, 0, 2.05, 0],
+    const k = key(x, y, z);
+    if (turretObjs.has(k)) disposeObject(turretObjs.get(k));
+    const g = makeTurretModel(level);
+    g.position.set(x,y,z);scene.add(g);turretObjs.set(k,g);
+}
+function makeTurretModel(level = 1) {
+  const g = new THREE.Group();
+  const timber=0x94704c, frame=0x34525d, snow=0xe6f0e5;
+  addVoxelDetails(g,[
+    [2,.3,2,0x73878a,0,-.33,0],
+    [1.9,.24,1.9,timber,0,1.27,0],
+    [1.95,.45,.15,frame,0,1.57,-.85],
+    [.15,.45,1.95,frame,-.85,1.57,0],
+    [.15,.45,1.95,frame,.85,1.57,0],
+    [2.25,.22,2.15,frame,0,2.25,0],
+    [2.3,.18,2.2,snow,0,2.44,0],
+    [1.7,.22,1.65,snow,0,2.62,0],
+    [1.05,.2,1.1,snow,0,2.82,0],
+    [.32,.36,.55,frame,0,1.65,.65],
+    [1.35,.16,.25,level>1?0xe5b462:0xb59465,0,1.85,1.05],
+    [.2,.18,1.15,0x263c47,0,1.85,1.04],
   ]);
-  if (level >= 2)
-    addVoxelDetails(g, [
-      [0.94, 0.08, 0.1, 0xffd36b, 0, 2.18, 0],
-      [0.1, 0.08, 0.94, 0xffd36b, 0, 2.18, 0],
-      [0.18, 0.18, 0.18, 0xffd36b, 0, 2.35, 0],
-    ]);
-  if (level >= 3)
-    addVoxelDetails(g, [
-      [0.16, 0.8, 0.16, 0x9ed7ff, 0, 2.52, 0],
-      [0.34, 0.12, 0.34, 0xffecad, 0, 2.96, 0],
-      [0.12, 0.38, 0.12, 0x8fe5ff, -0.42, 2.08, 0],
-      [0.12, 0.38, 0.12, 0x8fe5ff, 0.42, 2.08, 0],
-    ]);
-  for (const m of g.children) {
-    m.position.x *= 1.6;
-    m.position.z *= 1.6;
-    m.scale.x *= 1.6;
-    m.scale.z *= 1.6;
+  for(const px of [-.73,.73])for(const pz of [-.73,.73]){
+    const post=box(.27,2.65,.27,timber);post.position.set(px,.91,pz);g.add(post);
   }
-  const platform = box(2, 0.12, 2, 0x53677d);
-  platform.position.y = -0.44;
-  g.add(platform);
-  for (const px of [-0.8, 0.8])
-    for (const pz of [-0.8, 0.8]) {
-      const post = box(0.18, 1.9, 0.18, 0x765634);
-      post.position.set(px, 0.55, pz);
-      g.add(post);
-    }
-  g.position.set(x, y, z);
-  scene.add(g);
-  g.userData.level = level;
-  turretObjs.set(k, g);
+  for(const side of [-1,1]){
+    const brace=box(.17,1.85,.18,0xb69260);brace.position.set(side*.77,.52,0);brace.rotation.x=side*.82;g.add(brace);
+  }
+  if(level>1)addVoxelDetails(g,[[.28,.6,.28,0xe1af55,.96,2.13,-.85],[.48,.15,.48,frame,.96,2.5,-.85]]);
+    g.userData.level = level;
+    return g;
 }
 
 function refreshDefenseVisual(x, y, z) {
@@ -2398,12 +2491,13 @@ function getBuildCost(p) {
   return { wood: p.cost, coal: 0 };
 }
 
+function turretRange(level) { return T_RANGE + (level - 1) * 2.1; }
 function updateDefenseCombat(dt, t) {
   for (const [k, g] of turretObjs) {
     const [tx, ty, tz] = k.split(",").map(Number),
       st = defenseState.get(k),
       lv = st ? st.level : 1,
-      range = T_RANGE + (lv - 1) * 2.1,
+      range = turretRange(lv),
       rate = Math.max(0.34, T_RATE - (lv - 1) * 0.12),
       dmg = Math.round(turretDmg * (1 + (lv - 1) * 0.55));
     g._cd = (g._cd || 0) - dt;
@@ -2480,56 +2574,27 @@ function buildPlayer() {
   rifle.add(muzzle);
   rifle.position.set(0.3, 1.3, 0.35);
   player.add(rifle);
-  const coat = 0x365b8f,
-    coat2 = 0x294a78,
-    skin = 0xe7b98c,
-    fur = 0xe9edf4,
-    boot = 0x20344f,
-    body = box(0.54, 0.62, 0.34, coat);
-  body.position.y = 1.03;
-  player.add(body);
-  addVoxelDetails(player, [
-    [0.16, 0.16, 0.08, coat2, -0.18, 1.14, 0.205],
-    [0.16, 0.16, 0.08, coat2, 0.18, 1.14, 0.205],
-    [0.42, 0.09, 0.38, 0x6b4b34, 0, 0.82, 0],
-    [0.5, 0.1, 0.38, fur, 0, 1.34, 0],
-    [0.09, 0.22, 0.05, 0xe7c76d, -0.2, 1.03, 0.205],
-    [0.09, 0.22, 0.05, 0xe7c76d, 0.2, 1.03, 0.205],
-    [0.28, 0.06, 0.05, 0x9bc9ff, 0, 1.18, 0.205],
+  // Broad parka, mittens and boots read as one warm silhouette at phone size.
+  const coat=0xcb7540, dark=0x854735, fur=0xf2deae, boot=0x17323e;
+  const body=box(.76,.76,.55,coat);body.position.set(0,1.02,0);player.add(body);
+  addVoxelDetails(player,[
+    [.82,.2,.59,dark,0,.72,0],
+    [.8,.14,.61,fur,0,1.39,0],
+    [.11,.59,.04,0xe9ba68,0,1.04,.3],
+    [.32,.2,.12,dark,.22,.89,.3],
+    [.58,.51,.5,0x754d37,0,1.68,-.02],
+    [.4,.34,.12,0xe7b587,0,1.67,.26],
+    [.64,.16,.58,coat,0,1.96,-.02],
+    [.65,.13,.6,fur,0,1.87,-.02],
+    [.25,.15,.09,0x264452,0,1.72,.34],
+    [.58,.14,.16,dark,0,1.47,.27],
   ]);
-  const head = box(0.4, 0.4, 0.4, skin);
-  head.position.y = 1.56;
-  player.add(head);
-  addVoxelDetails(player, [
-    [0.11, 0.07, 0.035, 0x1c2430, -0.11, 1.59, 0.215],
-    [0.11, 0.07, 0.035, 0x1c2430, 0.11, 1.59, 0.215],
-    [0.08, 0.06, 0.04, 0xbd7559, 0, 1.49, 0.22],
-  ]);
-  const hat = box(0.46, 0.15, 0.46, 0xcf3f4d);
-  hat.position.y = 1.82;
-  player.add(hat);
-  addVoxelDetails(player, [
-    [0.18, 0.1, 0.5, 0xe9edf4, 0, 1.77, 0],
-    [0.18, 0.18, 0.18, 0xe9edf4, 0.17, 1.95, 0],
-  ]);
-  limbs.armL = box(0.17, 0.56, 0.17, coat);
-  limbs.armL.position.set(-0.36, 1.28, 0);
-  limbs.armL.geometry.translate(0, -0.24, 0);
-  player.add(limbs.armL);
-  limbs.armR = box(0.17, 0.56, 0.17, coat);
-  limbs.armR.position.set(0.36, 1.28, 0);
-  limbs.armR.geometry.translate(0, -0.24, 0);
-  player.add(limbs.armR);
-  addVoxelDetails(limbs.armL, [[0.19, 0.12, 0.19, fur, 0, -0.48, 0]]);
-  addVoxelDetails(limbs.armR, [[0.19, 0.12, 0.19, fur, 0, -0.48, 0]]);
-  limbs.legL = box(0.19, 0.58, 0.19, boot);
-  limbs.legL.position.set(-0.14, 0.6, 0);
-  limbs.legL.geometry.translate(0, -0.29, 0);
-  player.add(limbs.legL);
-  limbs.legR = box(0.19, 0.58, 0.19, boot);
-  limbs.legR.position.set(0.14, 0.6, 0);
-  limbs.legR.geometry.translate(0, -0.29, 0);
-  player.add(limbs.legR);
+  for(const [side,name] of [[-1,'L'],[1,'R']]){
+    const arm=box(.29,.58,.32,coat);arm.position.set(side*.49,1.3,0);arm.geometry.translate(0,-.22,0);player.add(arm);limbs['arm'+name]=arm;
+    addVoxelDetails(arm,[[.31,.12,.34,fur,0,-.43,0],[.32,.22,.35,boot,0,-.57,.025]]);
+    const leg=box(.27,.48,.3,0x344d56);leg.position.set(side*.2,.66,0);leg.geometry.translate(0,-.22,0);player.add(leg);limbs['leg'+name]=leg;
+    addVoxelDetails(leg,[[.32,.25,.46,boot,0,-.48,.07],[.34,.08,.48,0x0d2530,0,-.6,.07]]);
+  }
   player.position.copy(pPos);
   buildPlayerFeedback();
   scene.add(player);
@@ -2644,7 +2709,7 @@ function updatePlayer(dt, t) {
     }
   }
   camLook.lerp(
-    new THREE.Vector3(pPos.x, pPos.y + 1, pPos.z),
+    cameraFocusPoint(),
     Math.min(1, dt * 7),
   );
   camera.position.lerp(camLook.clone().add(CAM_OFFSET), Math.min(1, dt * 6));
@@ -2682,6 +2747,17 @@ function updatePlayer(dt, t) {
     limbs.armR.rotation.x = -1.25;
     limbs.armL.rotation.x = -0.95;
   }
+}
+
+function cameraFocusPoint(){
+  const focus=new THREE.Vector3(pPos.x,pPos.y+1,pPos.z);
+  if(introStep===3){focus.x-=.55;}
+  else if(introStep<3 && objectiveTarget){
+    const dx=objectiveTarget.x-pPos.x,dz=objectiveTarget.z-pPos.z;
+    const w=Math.min(.32,2/Math.max(1,Math.hypot(dx,dz)));
+    focus.x+=dx*w;focus.z+=dz*w;
+  }else if(Math.hypot(pPos.x,pPos.z)<13){focus.x*=.84;focus.z*=.84;}
+  return focus;
 }
 
 
@@ -3150,7 +3226,8 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
 }
 
 function spawnEnemyPack() {
-  if (waveLeft <= 0) return;
+  const allowance = nightSpawnAllowance();
+  if (allowance <= 0) return;
   const a = stageSpawnAngle(),
     r = R_INNER - 1.2,
     baseX = Math.round(Math.cos(a) * r),
@@ -3159,7 +3236,7 @@ function spawnEnemyPack() {
       day === 7 && waveLeft <= 1
         ? 1
         : Math.min(5, 2 + Math.floor(day / 2) + (Math.random() < 0.6 ? 1 : 0));
-  for (let i = 0; i < pack && waveLeft > 0; i++) {
+  for (let i = 0; i < pack && i < allowance && waveLeft > 0; i++) {
     const ox = (Math.random() * 2 - 1) * 1.5,
       oz = (Math.random() * 2 - 1) * 1.5;
     spawnEnemy(Math.round(baseX + ox), Math.round(baseZ + oz), null);
@@ -3205,12 +3282,7 @@ function updateEnemies(dt, t) {
         $("combo").style.opacity = 1;
       }
       sfx("kill");
-      worldPop(
-        combo >= 3 ? combo + " COMBO!" : "撃破!",
-        g.position.clone().add(new THREE.Vector3(0, 1.7, 0)),
-        combo >= 3 ? "#ffe08a" : "#fff",
-      );
-      toast(combo >= 3 ? "🔥 " + combo + " COMBO!" : "撃破! +4🌲 +2🪨");
+      // One fixed HUD counter; particles, loot and audio already mark the hit.
       updateHUD();
       continue;
     }
@@ -3688,6 +3760,9 @@ function updateObjective() {
       ? introStep < 4
         ? "準備ができるまで夜は来ません"
         : "夜まで " + Math.max(0, Math.ceil(phaseT)) + "秒"
+      : inNightRespite() ? '次の群れ ' + Math.ceil(nightAssault.remaining) + '秒'
+      : nightAssault?.mode === 'first' ? '1群 残' + (waveLeft - nightAssault.reserve + enemies.length) + '体'
+      : nightAssault?.mode === 'second' ? '2群 残' + (waveLeft + enemies.length) + '体'
       : "残り " + (waveLeft + enemies.length) + "体";
 }
 
@@ -3942,7 +4017,7 @@ function focusedGroundTag() {
   }
   return chosen;
 }
-const labelVector = new THREE.Vector3();
+
 function projectGroundTags(t) {
   const rect = renderer.domElement.getBoundingClientRect(),
     hudBottom = $("hud").getBoundingClientRect().bottom + 18;
@@ -3957,7 +4032,7 @@ function projectGroundTags(t) {
     // The outline is also the footprint: never rotate/scale it independently of the building.
     const introductory = introStep < 3;
     ring.visible =
-      running && ((!introductory && pad && !built && !locked) || selected);
+      running && ((!introductory && pad && !built && !locked && nearestLabels.includes(g)) || selected);
     ring.material.color.set(
       selected
         ? ready
@@ -3969,31 +4044,7 @@ function projectGroundTags(t) {
     );
     el.style.visibility = "hidden";
     if(phase === "night"){ring.visible=false;continue;}
-    const nearbyPad =
-      pad &&
-      !built &&
-      !locked &&
-      Math.hypot(g.position.x - pPos.x, g.position.z - pPos.z) < 11 &&
-      nearestLabels.includes(g) &&
-      introStep >= 3;
-    if (!selected || actionFocus || constructionSites.some(s => s.p.tag === g)) continue;
-    labelVector.copy(g.position).project(camera);
-    const x = rect.left + (labelVector.x * 0.5 + 0.5) * rect.width,
-      y = rect.top + (-labelVector.y * 0.5 + 0.5) * rect.height;
-    const w = el.offsetWidth || 105,
-      h = el.offsetHeight || 36;
-    if (
-      labelVector.z <= -1 ||
-      labelVector.z >= 1 ||
-      y - h / 2 <= hudBottom ||
-      x - w / 2 < rect.left + 6 ||
-      x + w / 2 > rect.right - 6 ||
-      y + h / 2 >= rect.bottom - 8
-    )
-      continue;
-    el.style.left = x - rect.left + "px";
-    el.style.top = y - rect.top + "px";
-    el.style.visibility = "visible";
+    // The action panel owns costs; floating cards would cover the player and hearth.
   }
 }
 
@@ -4183,11 +4234,6 @@ function completeSite(s) {
   p.progress = 0;
   burst(p.x, 1, p.z, buildColor(p.type), 10);
   celebrateBuild(p);
-  worldPop(
-    typeIcon(p.type) + " 完成",
-    new THREE.Vector3(p.x, 1.8, p.z),
-    "#ffe19a",
-  );
   updateHUD();
   return true;
 }
@@ -4430,7 +4476,7 @@ function actionCandidates() {
     );
   }
   if (introStep >= 3) {
-    if (phase === "day" && baseHP < baseMax)
+    if (canRepairCamp() && baseHP < baseMax)
       add(
         {
           id: "repair",
@@ -4441,7 +4487,7 @@ function actionCandidates() {
           z: -2.5,
           tag: baseGroundTag,
           apply: () => {
-            if (!canAfford({ wood: 30, coal: 5 }) || baseHP >= baseMax)
+            if (!canRepairCamp() || !canAfford({ wood: 30, coal: 5 }) || baseHP >= baseMax)
               return false;
             wood -= 30;
             coal -= 5;
@@ -4504,7 +4550,7 @@ function actionCandidates() {
             effect:
               st.type === "wall"
                 ? "耐久アップ＋全回復"
-                : st.type === "turret" && st.level === 1 ? "炉のそばまで射程拡大・全回復" : "火力・射程アップ＋全回復",
+                : st.type === "turret" && st.level === 1 ? "青: 現在 / 金: 強化後の射程・全回復" : "火力・射程アップ＋全回復",
             cost: getUpgradeCost(st),
             x,
             z,
@@ -4537,7 +4583,7 @@ function updateDwell(dt) {
   }
   actionFocus = candidate;
   const panel = $("actionPanel");
-  panel.hidden = !candidate;
+  panel.hidden = !candidate || actionLatched;
   if (!candidate) return;
   $("actionTitle").textContent =
     actionLatched && lastReceipt ? "届けました" : candidate.title;
@@ -4568,7 +4614,7 @@ function updateDwell(dt) {
       defenseActionConsumed = true;
       lastReceipt = `消費：${costWords(candidate.cost)}`;
       receiptUntil = gameElapsed + 4;
-      toast(lastReceipt);
+      if(!candidate.id.startsWith("build:")) toast(lastReceipt);
       haptic(20);
       saveRun();
     }
@@ -4609,22 +4655,36 @@ function updateJourney(dt) {
     sub = "見張り台と一緒に最初の群れを迎えよう";
     objectiveTarget = { x: 0, z: 3 };
   } else if (phase === "day") {
-    const r = RAID_TYPES[nextRaid.kind];
-    title = `次の襲撃：${r[0]} / ${nextRaid.direction}${currentStage === 3 ? "＋反対側" : "から"}`;
-    title = coal < 20 ? "夜に備えて石炭を集めよう" : "襲撃に備えて集落を整えよう";
-    sub = coal < 20 ? `石炭 ${coal | 0} / 20 · 炉の補給2回分` : `${nextRaid.direction}から ${r[0]}`;
-    if(baseHP<baseMax*.85){title="夜までに炉を修理しよう";sub="木材30・石炭5 / 炉の奥で止まる";objectiveTarget={x:0,z:-2.5};}
+    const prep = preparationAdvice();
+    title = prep.title; sub = prep.sub; objectiveTarget = prep.target;
+  } else if (inNightRespite()) {
+    if (fuel <= 80) {
+      title = coal >= 10 ? '次の群れへ備えて炉に補給' : '補給用の石炭を集めよう';
+      objectiveTarget = coal >= 10 ? {x:-1.8,z:0} : nearbyResource('coal');
+    } else if (baseHP < baseMax) {
+      title = '今のうちに集落を修理しよう';
+      objectiveTarget = wood < 30 ? nearbyResource('wood') : coal < 5 ? nearbyResource('coal') : {x:0,z:-2.5};
+    } else {
+      title = '整備して西側へ戻ろう';
+      const gap=buildPads.find(p=>p.type==='wall'&&p.x===-8&&!p.built&&!p.constructing);
+      objectiveTarget = gap && wood>=15 ? {x:-6.8,z:gap.z} : {x:-5.5,z:0};
+    }
+    sub = `第2群17体まで ${Math.ceil(nightAssault.remaining)}秒 / 修理は木材30・石炭5`;
   } else {
-    title = day === 7 ? "霜翼竜を退けよう" : "炉を守り抜こう";
-    sub =
-      fuel < 45
-        ? "燃料低下！ 炉の左側で止まって石炭を投入"
-        : "射撃は自動。敵の近くへ移動して援護";
-    if (fuel < 45) objectiveTarget = { x: -1.8, z: 0 };
+    const weakFront=[...defenseState].some(([k,st])=>{const [x,,z]=k.split(',').map(Number);return st.type==='wall'&&st.hp<st.maxHp*.5&&x*Math.cos(nextRaid.angle)+z*Math.sin(nextRaid.angle)>5.5;});
+    const closeEnemy=enemies.some(e=>Math.hypot(e.model.g.position.x,e.model.g.position.z)<6);
+    const earlyFuel=fuel<=80 && (weakFront||closeEnemy);
+    const needFuel=fuel<45 || earlyFuel;
+    title = needFuel ? (coal < 10 ? '石炭不足！ 黒い鉱石を集めよう' : fuel<45 ? '燃料低下！ 炉の左で補給' : '前線が危険！ 先に炉へ補給しよう') : day === 7 ? '竜を炉から引き離そう' : '炉を守り抜こう';
+    sub = needFuel ? '炉への攻撃で燃料も減る / 石炭10で補給' : '射撃は自動。敵の近くへ移動して援護';
+    if(needFuel)objectiveTarget=coal>=10?{x:-1.8,z:0}:nearbyResource('coal');
+    if(nightAssault?.mode==='first')sub='撃退後12秒で第2群17体 / 補給・修理の時間';
+
   }
   $("gestureGuide").hidden = !running || introStep !== 2;
   $("gestureGuide").style.animationPlayState = settings.motion ? "running" : "paused";
   $("gameViewport").setAttribute("data-motion", String(settings.motion));
+  $("gameViewport").setAttribute("data-assault", phase==='night' ? nightAssault?.mode || '' : '');
   $("journeyTitle").textContent = title;
   $("journeySub").textContent = sub;
   if (guideRing) {
@@ -4645,7 +4705,7 @@ function updateJourney(dt) {
       introStep < 3 ||
       !running ||
       actionFocus?.id !== ({fuelStation:"fuel",baseStation:"base",repairStation:"repair"}[id]) ||
-      (id === "repairStation" && (phase !== "day" || baseHP >= baseMax));
+        (id === "repairStation" && (!canRepairCamp() || baseHP >= baseMax));
     if (!el.hidden) {
       const v = new THREE.Vector3(x, 0.6, z).project(camera),
         r = renderer.domElement.getBoundingClientRect();
@@ -4660,6 +4720,62 @@ function updateJourney(dt) {
   }
   updateAmbience(dt);
   updateIntroGuide();
+}
+function nearbyResource(type) {
+  let target=null, distance=Infinity;
+  for(const e of blockArr){
+    if(e.y!==1 || e.b.t!==type)continue;
+    const d=Math.hypot(e.x-pPos.x,e.z-pPos.z);
+    if(d<distance){target={x:e.x,z:e.z};distance=d;}
+  }
+  return target;
+}
+function preparationAdvice() {
+  const raid=`${nextRaid.direction}${currentStage===3?'＋反対側':''}から ${RAID_TYPES[nextRaid.kind][0]}`;
+  if(baseHP < baseMax*.9){
+    const missing=wood<30?'wood':coal<5?'coal':null;
+    return {title:`集落の耐久 ${Math.ceil(baseHP/baseMax*100)}% → 修理を優先`,
+      sub:missing?`修理に木材30・石炭5 / ${missing==='wood'?'木':'黒い鉱石'}を集めよう`:'木材30・石炭5 / 光る場所で指を離す',
+      target:missing?nearbyResource(missing):{x:0,z:-2.5}};
+  }
+    const reserve=nextRaid.kind==='fuel'?30:20;
+    if(coal<reserve)return {title:'夜の補給用に石炭を残そう',sub:`石炭 ${coal|0} / ${reserve} ・ ${raid}`,target:nearbyResource('coal')};
+          if(nextRaid.kind==='boss'){
+        if(baseLevel<3){
+          const c=baseUpgradeCost(),missing=wood<c.wood?'wood':coal<c.coal+30?'coal':null;
+          return {title:'竜に備えて炉の耐久を増やそう',sub:`木材${c.wood}・石炭${c.coal} / 集落Lv.${baseLevel+1}`,target:missing?nearbyResource(missing):{x:1.8,z:0}};
+        }
+        if(coal<50)return {title:'竜との戦いに石炭を確保しよう',sub:`石炭 ${coal|0} / 50 ・ 戦闘中も炉へ補給`,target:nearbyResource('coal')};
+        return {title:'竜の印を炉から離して誘導しよう',sub:'光る円の外へ / 燃料が減ったら炉へ補給',target:{x:5.5,z:0}};
+      }
+const front=buildPads.filter(p=>p.type==='turret' && p.x*Math.cos(nextRaid.angle)+p.z*Math.sin(nextRaid.angle)>4);
+    const missingTower=front.find(p=>!p.built&&!p.constructing);
+    if(day>=3 && missingTower){
+      const target={x:missingTower.x+(missingTower.x<0?1.7:-1.7),z:missingTower.z};
+      return {title:`${nextRaid.direction}側を2つの見張り台で守ろう`,sub:`木材40 / ${raid}`,target:wood>=40?target:nearbyResource('wood')};
+    }
+    const towers=[...defenseState].filter(([,s])=>s.type==='turret'&&s.level<MAX_DEF_LV)
+      .map(([k,s])=>{const [x,,z]=k.split(',').map(Number);return{x,z,s};})
+      .filter(p=>p.x*Math.cos(nextRaid.angle)+p.z*Math.sin(nextRaid.angle)>4)
+      .sort((a,b)=>a.s.level-b.s.level);
+    const tower=towers[0];
+    const wall=buildPads.find(p=>p.type==='wall'&&!p.built&&!p.constructing && p.x*Math.cos(nextRaid.angle)+p.z*Math.sin(nextRaid.angle)>5.5);
+    if(day>=3 && wall && (!tower || tower.s.level>=2)){
+      const vertical=Math.abs(wall.x)>=Math.abs(wall.z);
+      return {title:`${nextRaid.direction}側を門と防壁でふさごう`,sub:`木材15 / ${raid}`,
+        target:wood>=15?{x:wall.x+(vertical?(wall.x<0?1.2:-1.2):0),z:wall.z+(!vertical?(wall.z<0?1.2:-1.2):0)}:nearbyResource('wood')};
+    }
+    const cost=tower?getUpgradeCost(tower.s):null;
+    if(tower && day>1 && wood>=cost.wood && coal>=cost.coal+reserve)
+      return {title:`見張り台Lv.${tower.s.level+1}で炉のそばまで守ろう`,sub:`木材${cost.wood}・石炭${cost.coal} / ${raid}`,target:{x:tower.x+(tower.x<0?1.7:-1.7),z:tower.z}};
+    const frontWalls=[...defenseState].filter(([k,s])=>{const [x,,z]=k.split(',').map(Number);return s.type==='wall'&&s.level<MAX_DEF_LV&&x*Math.cos(nextRaid.angle)+z*Math.sin(nextRaid.angle)>5.5;}).sort((a,b)=>a[1].level-b[1].level);
+    if(day>=3 && frontWalls.length){
+      const [k,st]=frontWalls[0],[x,,z]=k.split(',').map(Number),c=getUpgradeCost(st),vertical=Math.abs(x)>=Math.abs(z),gate=isGateWall(x,z);
+      const target={x:x+(vertical?(x<0?1.2:-1.2):(gate?1.6:0)),z:z+(vertical?(gate?1.8:0):(z<0?1.2:-1.2))};
+      const missing=wood<c.wood?'wood':coal<c.coal+reserve?'coal':null;
+    return {title:`${nextRaid.direction}の${gate?'門':'防壁'}をLv.${st.level+1}へ`,sub:`木材${c.wood}${c.coal?'・石炭'+c.coal:''} / ${raid}`,target:missing?nearbyResource(missing):target};
+    }
+  return {title:'襲撃の側で迎え撃とう',sub:raid+' / 門で止め、見張り台で攻撃',target:null};
 }
 function updateWaypoint() {
   updateEdgeCues();
@@ -4676,7 +4792,12 @@ function updateWaypoint() {
     y = Math.max(135, Math.min(rect.height - 170, sy));
   el.style.left = x + "px";
   el.style.top = y + "px";
-  el.textContent = introStep < 2 ? "木" : "◆";
+  const off=sx<32 || sx>rect.width-32 || sy<145 || sy>rect.height-150;
+  const angle=Math.atan2(sy-rect.height/2,sx-rect.width/2);
+  const arrows=['→','↘','↓','↙','←','↖','↑','↗'];
+  const label=introStep<2?'木を集める':introStep===2?'建てる':introStep===3?'炉へ':phase==='night'?'補給':'準備';
+  el.textContent=(off?arrows[(Math.round(angle/(Math.PI/4))+8)%8]:'↓')+' '+label;
+  el.setAttribute('data-offscreen',String(off));
 }
 function endExperience() {
   runActive = false;
@@ -4734,6 +4855,7 @@ function snapshotRun() {
     version: 2,
     savedAt: Date.now(),
     stage: currentStage,
+    nightAssault: nightAssault ? { ...nightAssault } : null,
     state: {
       wood,
       coal,
@@ -4851,6 +4973,15 @@ function validRun(s) {
     !pos(s.p)
   )
     return false;
+  if (s.nightAssault != null) {
+    const a = s.nightAssault;
+    if (s.stage !== 1 || nums.day !== 5 || nums.phase !== 'night' ||
+        !['first','break','second'].includes(a.mode) || a.reserve !== 17 ||
+        !finite(a.remaining,0,12) ||
+        (a.mode === 'first' && nums.waveLeft < 17) ||
+        (a.mode === 'break' && (nums.waveLeft !== 17 || !Array.isArray(s.enemies) || s.enemies.length !== 0)) ||
+        (a.mode === 'second' && nums.waveLeft > 17)) return false;
+  }
   for (const k of [
     "wood",
     "coal",
@@ -5108,6 +5239,8 @@ function resumeRun() {
       comboT,
     } = s.state);
     nextRaid = s.nextRaid;
+    // Old saves keep their original encounter; new Day5 starts opt into two groups.
+    nightAssault = s.nightAssault ? { ...s.nightAssault } : null;
     blocks = new Map(s.blocks);
     defenseState.clear();
     s.pads.forEach((v, i) => Object.assign(buildPads[i], v));
@@ -5200,6 +5333,8 @@ function resumeRun() {
     actionLatched = true;
     actionTime = 0;
     actionFocus = null;
+    updateJourney(0);
+    updateIntroGuide();
     if (s.upgrades) showUpgrade(s.upgrades);
     toast("続きから再開しました");
     return true;
@@ -5221,6 +5356,8 @@ function pauseGame() {
   paused = true;
   running = false;
   resetInput();
+  actionTime = 0;
+  actionLatched = true;
   saveRun();
   audioCtx?.suspend();
   $("pausePanel").classList.remove("hidden");
@@ -5241,6 +5378,7 @@ function returnToTitle() {
   running = false;
   runActive = false;
   resetInput();
+  audioCtx?.suspend();
   $("pausePanel").classList.add("hidden");
   $("upgrade").classList.add("hidden");
   $("gameover").classList.add("hidden");
@@ -5303,6 +5441,43 @@ function bindSessionUI() {
 // ---- game ----
 // game system — v12, integrated from the deployed v11.
 
+// The unspawned reserve stays in waveLeft, so total enemies and completion stay truthful.
+function beginNightAssault() {
+  nightAssault = currentStage === 1 && day === 5
+    ? { mode: 'first', reserve: 17, remaining: 12 }
+    : null;
+}
+function nightSpawnAllowance() {
+  if (!nightAssault) return waveLeft;
+  if (nightAssault.mode === 'break') return 0;
+  return nightAssault.mode === 'first' ? Math.max(0, waveLeft - nightAssault.reserve) : waveLeft;
+}
+function inNightRespite() {
+  return phase === 'night' && nightAssault?.mode === 'break';
+}
+function canRepairCamp() {
+  return phase === 'day' || inNightRespite();
+}
+function updateNightAssault(dt) {
+  if (!nightAssault) return;
+  if (nightAssault.mode === 'first' && waveLeft === nightAssault.reserve && enemies.length === 0) {
+    nightAssault.mode = 'break';
+    nightAssault.remaining = 12;
+    showWaveBanner('第1群を撃退', '12秒後に第2群17体 / 炉へ補給・集落を修理');
+    sfx('complete');
+    saveRun();
+  } else if (nightAssault.mode === 'break') {
+    nightAssault.remaining = Math.max(0, nightAssault.remaining - dt);
+    if (nightAssault.remaining === 0) {
+      nightAssault.mode = 'second';
+      spawnT = 0;
+      showWaveBanner('第2群 接近', `${nextRaid.direction}から17体 / 炉を守ろう`);
+      sfx('wave');
+      saveRun();
+    }
+  }
+}
+
 function update(dt, t) {
   if (fuel <= 0 || baseHP <= 0) {
     gameOver(fuel <= 0);
@@ -5320,13 +5495,14 @@ function update(dt, t) {
       phase = "night";
       phaseT = 999;
       waveLeft = nightEnemyCount(day);
+      beginNightAssault();
       spawnT = 0;
       stagePackIndex = 0;
       const nm = RAID_TYPES[nextRaid.kind];
       sfx(day === 7 ? "boss" : "wave");
       showWaveBanner(
         day === 7 ? "☠️ FINAL NIGHT" : "🌙 NIGHT " + day,
-        day === 7 ? "巨大ボス襲来" : nm[0] + " / " + nm[1],
+        day === 7 ? "巨大ボス襲来" : nightAssault ? '第1群18体 → 整備12秒 → 第2群17体' : nm[0] + " / " + nm[1],
       );
       toast("🌙 第" + day + "夜 — 襲撃開始!");
     }
@@ -5337,7 +5513,8 @@ function update(dt, t) {
       fireDrainMul *
       (nightModifier === "fuel" ? 1.7 : 1) *
       dt;
-    if (waveLeft > 0) {
+    updateNightAssault(dt);
+    if (nightSpawnAllowance() > 0) {
       spawnT -= dt;
       if (spawnT <= 0) {
         spawnT = Math.max(0.18, 0.5 - day * 0.03);
@@ -5383,37 +5560,51 @@ function winGame() {
   sfx("base");
 }
 
+function rewardIcon(kind){
+  const paths={
+    attack:'<path d="M8 5l16 11L8 27V5zm0 11h19m-4-4 4 4-4 4"/>',
+    boots:'<path d="M9 5h10v15l7 3v5H7v-8h2V5z"/><path d="M10 10h7m-7 5h7"/>',
+    tower:'<path d="M7 28V12h18v16M4 12l12-8 12 8H4zm4 8h16m-8-7v15"/>',
+    fire:'<path d="M16 3l3 9 5-3 3 12-4 7H9l-5-7 6-12 2 6 4-12z"/>',
+    supply:'<path d="M5 10l11-5 11 5v16H5V10zm0 0h22M12 6v20m8-20v20"/>',
+    fort:'<path d="M4 27V7h6v5h4V7h5v5h4V7h5v20H4zm9 0v-9h7v9"/>',
+    repair:'<path d="M6 11l10-7 10 7v17H6V11zm10 2v10m-5-5h10"/>'
+  };
+  return `<svg class="rewardIcon" viewBox="0 0 32 32" aria-hidden="true" fill="#345663" stroke="#e5bc78" stroke-width="2" stroke-linejoin="round">${paths[kind]||paths.supply}</svg>`;
+}
+
 function showUpgrade(savedPicks = null) {
   upgrading = true;
   running = false;
+  $("combo").hidden=true;
   resetInput();
   const pool = [
     {
-      icon: "🏹",
+      icon: "attack",
       name: "自動射撃強化",
       desc: "自動攻撃ダメージ +20%",
       apply: () => (playerDmg = Math.round(playerDmg * 1.2)),
     },
     {
-      icon: "👢",
+      icon: "boots",
       name: "雪上ブーツ",
       desc: "移動速度 +12%",
       apply: () => (moveSpeed *= 1.12),
     },
     {
-      icon: "🗼",
+      icon: "tower",
       name: "矢塔改良",
       desc: "矢塔ダメージ +30%",
       apply: () => (turretDmg = Math.round(turretDmg * 1.3)),
     },
     {
-      icon: "🔥",
+      icon: "fire",
       name: "断熱炉",
       desc: "夜の燃料消費 -15%",
       apply: () => (fireDrainMul *= 0.85),
     },
     {
-      icon: "🧱",
+      icon: "supply",
       name: "補給物資",
       desc: "木材 +55 / 石炭 +20",
       apply: () => {
@@ -5422,7 +5613,7 @@ function showUpgrade(savedPicks = null) {
       },
     },
     {
-      icon: "🏰",
+      icon: "fort",
       name: "要塞改修",
       desc: "全防衛設備を1段階強化",
       apply: () =>
@@ -5436,7 +5627,7 @@ function showUpgrade(savedPicks = null) {
         }),
     },
     {
-      icon: "❤️",
+      icon: "repair",
       name: "拠点補修",
       desc: "拠点耐久を全回復",
       apply: () => (baseHP = baseMax),
@@ -5451,7 +5642,7 @@ function showUpgrade(savedPicks = null) {
   picks.forEach((u) => {
     const b = document.createElement("button");
     b.className = "upCard";
-    b.innerHTML = `<div style="font-size:30px">${u.icon}</div><b>${u.name}</b><span>${u.desc}</span>`;
+    b.innerHTML = `${rewardIcon(u.icon)}<b>${u.name}</b><span>${u.desc}</span>`;
     b.onclick = () => {
       u.apply();
       defenseState.forEach((st, k) => {
@@ -5461,6 +5652,7 @@ function showUpgrade(savedPicks = null) {
         refreshDefenseVisual(x, y, z);
       });
       $("upgrade").classList.add("hidden");
+      nightAssault = null;
       day++;
       phase = "day";
       phaseT = 40;
@@ -5476,8 +5668,9 @@ function showUpgrade(savedPicks = null) {
       running = true;
       saveRun();
       updateHUD();
-      showWaveBanner("☀️ DAY " + day, "領土を広げて次の夜に備えよう");
-      toast("☀️ Day " + day + " — 新しい外部拠点を狙おう");
+      const advice = preparationAdvice();
+      showWaveBanner("☀️ DAY " + day, advice.title);
+      toast(advice.sub);
     };
     wrap.appendChild(b);
   });
@@ -5514,6 +5707,7 @@ function gameOver(froze) {
 }
 
 function startGame(stage = currentStage) {
+  nightAssault = null;
   if (!Number.isInteger(stage) || stage < 1 || stage > unlockedStage())
     return false;
   currentStage = stage;
@@ -5664,7 +5858,8 @@ function frame() {
   projectGroundTags(t);
   if (running) updateWaypoint();
   updateDragonUI();
-  renderer.render(scene, camera);
+  if (!$('title').classList.contains('hidden')) renderTitleCamp(t);
+  else { updateContactShadows(); renderer.render(scene, camera); }
 }
 function boot() {
   try {
@@ -5699,6 +5894,7 @@ function boot() {
       e.preventDefault();
       contextLost = true;
       resetInput();
+      pauseGame();
       $("runtimeStatus").hidden = false;
       $("runtimeStatus").textContent = "描画を復旧しています…";
     });
