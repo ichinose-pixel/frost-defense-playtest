@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>フロスト・ディフェンス — 灯の集落</title>
-    <link rel="stylesheet" href="styles/game.css?v=21" />
+    <link rel="stylesheet" href="styles/game.css?v=26" />
   </head>
   <body>
     <div id="gameViewport">
@@ -15,17 +15,18 @@
         <span class="brandMark">FROST / 灯の集落</span
         ><button id="pauseBtn" aria-label="一時停止と設定">Ⅱ</button>
       </div>
+      <section id="introCard" hidden><span id="introNumber"></span><b id="introTitle"></b><p id="introHelp"></p></section>
       <section id="journey" hidden aria-live="polite">
         <b id="journeyTitle"></b><span id="journeySub"></span>
       </section>
       <div id="waypoint" hidden aria-hidden="true">◆</div>
-      <div id="furnaceDirection" class="edgeCue" hidden></div><div id="raidDirection" class="edgeCue raid" hidden></div><div id="gestureGuide" hidden><i>☝</i><span>すべらせる → 離す → 建築</span></div>
+      <div id="furnaceDirection" class="edgeCue" hidden></div><div id="raidDirection" class="edgeCue raid" hidden></div><div id="gestureGuide" hidden aria-hidden="true"><i></i></div>
       <div id="repairStation" class="station" hidden>修理 · 木材30</div>
       <div id="fuelStation" class="station" hidden>石炭 → 炉</div>
       <div id="baseStation" class="station" hidden>集落を強化</div>
       <section id="actionPanel" hidden>
         <b id="actionTitle"></b><span id="actionCost"></span>
-        <div class="dwellTrack"><i id="actionFill"></i></div>
+        <div class="dwellTrack" id="actionTrack"><i id="actionFill"></i></div>
         <small id="actionHelp"></small>
       </section>
       <div id="victoryMoment" hidden></div>
@@ -91,9 +92,9 @@
       </div>
       <div id="runtimeStatus" role="status" hidden></div>
       <div id="title" class="overlay">
-        <div class="eyebrow">A LITTLE LIGHT IN THE SNOW</div>
-        <div class="titleEmblem" aria-hidden="true">◆</div>
-        <h1>フロスト・ディフェンス</h1>
+        <div class="eyebrow">雪の向こうに、暮らしを。</div>
+        <div class="titleEmblem" aria-hidden="true"><i></i><i></i><i></i></div>
+        <h1>FROST<br><strong>DEFENSE</strong></h1>
         <h2>灯の集落</h2>
         <p class="titleLead">
           木を集め、灯を育て、<br />小さな集落の夜を守る。
@@ -155,6 +156,6 @@
       </div>
     </div>
     <script src="vendor/three-0.160.0.min.js"></script>
-    <script src="dist/game.js?v=21"></script>
+    <script src="dist/game.js?v=26"></script>
   </body>
 </html>

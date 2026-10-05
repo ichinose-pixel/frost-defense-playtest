@@ -1157,3 +1157,57 @@ body {
   display:inline-block; padding:3px 7px; border-radius:6px;
   color:#f6f5e7; background:rgba(12,35,48,.9); font-size:10px;
 }
+
+/* v26: one glacial palette and a readable mobile hierarchy. */
+:root{--ice:#e7f2ef;--ink:#102d3b;--brass:#ffd38b;--panel:#163946f2}
+body{font-family:system-ui,-apple-system,"Yu Gothic",sans-serif;color:var(--ice)}
+.overlay{background:linear-gradient(155deg,#0b2637f2,#153d49ef);color:var(--ice)}
+#title{justify-content:center;padding:32px 24px;background:radial-gradient(ellipse at 50% 45%,#a96e304d,transparent 45%),linear-gradient(160deg,#0b2938f5,#214852ed);gap:0}
+#title:before,#title:after{content:"";position:absolute;pointer-events:none;z-index:-1;bottom:0;width:75%;height:65%;background:#284e59;clip-path:polygon(0 100%,0 60%,20% 60%,20% 45%,30% 45%,30% 30%,40% 45%,50% 45%,50% 65%,60% 65%,60% 40%,70% 40%,70% 20%,80% 40%,90% 40%,90% 65%,100% 65%,100% 100%);opacity:.3}
+#title:before{left:-25%}#title:after{right:-25%;transform:scaleX(-1)}
+#title .eyebrow{font-size:15px;letter-spacing:.12em;color:#b9d8dc;margin-bottom:14px}
+#title h1{font-size:42px;line-height:.97;letter-spacing:.08em;font-weight:400;margin:14px 0 8px;color:#e9f4ef;text-shadow:none}
+#title h1 strong{font-weight:850;color:#ffda9b}
+#title h2{font-size:20px;font-weight:500;letter-spacing:.18em;margin:5px 0 12px;color:#e3eeeb}
+#title .titleLead{font-size:17px;line-height:1.6;margin:10px 0 22px;color:#cfe2df}
+.titleEmblem{position:relative;width:94px;height:108px;margin:8px auto 5px;font-size:0;filter:drop-shadow(0 8px 22px #ffad4955)}
+.titleEmblem i{position:absolute;bottom:4px;left:16px;width:65px;height:90px;background:#e98e42;clip-path:polygon(50% 0,83% 42%,100% 60%,91% 86%,50% 100%,8% 86%,0 58%,24% 37%)}
+.titleEmblem i:nth-child(2){background:#ffc775;transform:scale(.67);transform-origin:bottom}
+.titleEmblem i:nth-child(3){background:#fff0be;transform:scale(.34);transform-origin:bottom}
+#stageSelect{gap:8px;margin:8px 0;width:100%}#stageSelect button{font-size:16px;min-height:48px;border-radius:12px}
+#stageDescription{font-size:15px;line-height:1.5;margin:10px 0 16px;color:#c6dfe0}
+#title .btn,.btn{font-size:20px;min-height:58px;border-radius:16px;background:linear-gradient(#ffdda0,#efb46a);color:#253e44;box-shadow:0 5px 0 #9b6b37,0 12px 30px #061f3266;border:1px solid #ffedc4}
+#title .controlNote{font-size:15px;line-height:1.7;color:#b9d5d9;margin-top:20px}
+#campaignNote{font-size:14px;margin:8px 0}#campaignRecord{font-size:15px}
+#playTools .brandMark{font-size:12px;letter-spacing:.08em;opacity:.9}
+#pauseBtn{width:46px;height:46px;border-radius:14px;font-size:23px;background:var(--panel)}
+#hud{top:calc(62px + env(safe-area-inset-top));gap:7px;left:14px;right:14px;padding:0}
+#hud .chip{border:1px solid #9fc6cc55;border-radius:14px;background:var(--panel);padding:8px 10px;min-width:85px;box-shadow:0 3px 12px #0a293222}
+#hud .chip small{font-size:13px;color:#c4dfe0;line-height:1.25}#hud .chip b{font-size:22px;line-height:1.2}#hud .chip em{font-size:13px}
+#hud .status:nth-child(4){min-width:84px;padding:8px}#hud .status:nth-child(4) b{font-size:18px}
+#gameViewport[data-phase="night"] #hud #fuelChip,#gameViewport[data-phase="night"] #hud #baseChip{min-width:98px}
+#phaseBar{top:-45px;left:auto;right:58px}#phaseCaption{font-size:14px;padding:6px 9px;background:#163946e8}
+#journey,#gameViewport.boss-active #journey{top:calc(140px + env(safe-area-inset-top));left:14px;max-width:calc(100% - 28px);padding:10px 13px;border-radius:14px;background:var(--panel);border-left:3px solid #ffd38b}
+#journey b{font-size:18px;line-height:1.4}#journey span{font-size:15px;line-height:1.45;margin-top:4px}
+#bossPanel{top:135px}#gameViewport.boss-active #journey{top:205px}
+#actionPanel{bottom:calc(22px + env(safe-area-inset-bottom));left:14px;right:14px;width:auto;max-width:none;border-radius:20px;padding:16px 18px;background:var(--panel);border:1px solid #edcd9580;box-shadow:0 9px 35px #08243550}
+#actionPanel b{font-size:22px;line-height:1.35}#actionPanel span{font-size:16px;line-height:1.5;margin:8px 0}#actionPanel small{font-size:15px;line-height:1.5}
+.dwellTrack{height:10px;margin:12px 0}.dwellTrack[hidden]{display:none}
+.edgeCue{font-size:15px;padding:9px 12px;border-width:2px}.station{font-size:15px;padding:7px 10px}.groundHud{font-size:17px}.groundHud .cost{font-size:15px}
+#introCard{position:absolute;top:calc(72px + env(safe-area-inset-top));left:18px;right:18px;z-index:21;padding:16px 18px;background:#143844f5;border:1px solid #b6d7d166;border-radius:20px;box-shadow:0 8px 28px #0b253b33;pointer-events:none}
+#introNumber{display:block;font-size:14px;color:#ffd48d;letter-spacing:.14em;margin-bottom:7px}#introTitle{display:block;font-size:24px;line-height:1.3}#introHelp{font-size:17px;line-height:1.55;margin:8px 0 0;color:#cce1df}
+#gameViewport[data-intro="true"] #hud,#gameViewport[data-intro="true"] #journey,#gameViewport[data-intro="true"] .edgeCue,#gameViewport[data-intro="true"] #waveBanner,#gameViewport[data-intro="true"] #toast{display:none!important}
+#gameViewport[data-intro="true"] #actionPanel{bottom:24px}
+#gestureGuide{bottom:auto;width:50px;height:65px;transform:none;filter:drop-shadow(0 3px 4px #10263888)}
+#gestureGuide i{position:absolute;width:29px;height:42px;border-radius:12px 12px 9px 9px;border:3px solid white;background:#f3cb98;transform:rotate(-20deg);animation:guideDrag 2.2s ease-in-out infinite}
+#gestureGuide i:before{content:"";position:absolute;left:4px;top:-19px;width:10px;height:31px;border-radius:8px 8px 0 0;background:#f3cb98;border:3px solid white;border-bottom:0}
+#gestureGuide[data-release="true"] i{animation:guideRelease 1.8s ease-in-out infinite}
+@keyframes guideDrag{0%,15%{transform:translate(0,0) rotate(-20deg);opacity:1}70%{transform:translate(-30px,-24px) rotate(-20deg);opacity:1}90%,100%{transform:translate(-30px,-34px) rotate(-20deg);opacity:0}}
+@keyframes guideRelease{0%,25%{transform:translateY(0) rotate(-20deg);opacity:1}65%,100%{transform:translateY(-26px) rotate(-20deg);opacity:0}}
+#waypoint{font-size:48px;color:#ffdb8b;filter:drop-shadow(0 2px 8px #ffa42b55)}
+.worldPop{font-size:21px;font-weight:800;text-shadow:0 2px 0 #163a47,0 3px 10px #163a47}#toast{font-size:17px;border-radius:14px;padding:10px 15px;bottom:190px}#combo{font-size:24px;top:auto;bottom:220px}
+#waveBanner{font-size:34px;text-shadow:0 3px 8px #163545}#waveBanner div{font-size:17px!important;line-height:1.6;letter-spacing:0!important}
+.settingsGrid label{font-size:16px;line-height:1.5}.secondaryBtn{font-size:17px;min-height:48px}.upCard b{font-size:20px}.upCard span{font-size:16px}
+#gameViewport[data-motion="false"] #gestureGuide i{animation:none;transform:rotate(-20deg)}
+@media(prefers-reduced-motion:reduce){#gestureGuide i{animation:none}}
+@media(max-height:700px){#title{padding:18px 24px}.titleEmblem{height:64px;transform:scale(.7);margin:-8px auto}#title h1{font-size:34px}#title .titleLead{margin:7px 0}#title .controlNote{margin-top:12px}#stageDescription{margin:6px 0}#introCard{padding:12px 16px}#introTitle{font-size:22px}}

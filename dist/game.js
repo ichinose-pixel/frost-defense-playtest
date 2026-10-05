@@ -465,9 +465,7 @@ function buildTerrain() {
       const r = Math.max(Math.abs(x), Math.abs(z));
       if (r <= R_INNER) blocks.set(key(x, 0, z), { t: "snow", hp: 0 });
       else if (r <= WORLD_EDGE) {
-        const h = 2 + ((((x * 7 + z * 13) % 4) + 4) % 4);
-        for (let y = 0; y < h; y++)
-          blocks.set(key(x, y, z), { t: "rock", hp: 0 });
+        blocks.set(key(x,0,z),{t:'snow',hp:0});
       }
     }
   let placed = 0,
@@ -550,7 +548,7 @@ function flushWorld() {
     } else {
       m.makeTranslation(e.x, e.y, e.z);
       inst.setMatrixAt(count, m);
-      c.setHex(stageBlockColor(e)).multiplyScalar(hashJitter(e.x, e.y, e.z));
+      c.setHex(stageBlockColor(e)).multiplyScalar(e.b.t==='snow'?1:hashJitter(e.x, e.y, e.z));
       inst.setColorAt(count++, c);
     }
   }
@@ -571,7 +569,7 @@ function rebuild() {
 function initScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x182a3a);
-  scene.fog = null;
+  scene.fog = new THREE.FogExp2(0xb5d4df,.009);
   camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 200);
   camera.position.set(8.6, 12, 14);
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -592,6 +590,7 @@ function initScene() {
   inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(inst);
   buildTerrain();
+  buildSnowHorizon();
   fireGroup = new THREE.Group();
   const logG = new THREE.BoxGeometry(0.9, 0.25, 0.25),
     logM = new THREE.MeshLambertMaterial({ color: 0x6a4520 });
@@ -733,15 +732,17 @@ function disposeObject(object) {
 
 function updateEnvironment(dt, t) {
   nightK += ((phase === "night" ? 1 : 0) - nightK) * Math.min(1, dt * 1.2);
-  sun.intensity = 1.3 - nightK * 1.02;
+  sun.intensity = 1.9 - nightK * 1.62;
   sun.color.setHex(phase === "night" ? 0x739bd9 : 0xffffff);
-  hemi.intensity = 1.1 - nightK * 0.72;
+  hemi.intensity = 1.75 - nightK * 1.37;
+  if(scene.fog)scene.fog.color.setHex(phase==='night'?0x17384e:0xb5d4df);
   const sa = (phase === "day" ? 1 - phaseT / 30 : 0.5) * Math.PI;
   sun.position.set(Math.cos(sa) * 30, Math.max(6, Math.sin(sa) * 30), 10);
   const fr = fuel / 100;
   fireLight.intensity =
     (0.6 + fr * 2.2) * (1 + nightK * 0.8) + Math.sin(t * 11) * 0.25;
   fireLight.distance = 12 + fr * 12;
+  if(campGlow)campGlow.material.uniforms.strength.value=(.2+nightK*.36)*fr;
 }
 
 
@@ -770,13 +771,14 @@ function updateCanopyFocus() {
   }
   const p = new THREE.Vector3(pPos.x, 1.5, pPos.z).project(camera);
   canopyFocus.value.set(p.x, p.y);
-  const target = actionFocus || (introStep >= 2 ? objectiveTarget : null);
+  const target = constructionSites[0]?.p || actionFocus || (introStep >= 2 ? objectiveTarget : null);
   if (target) {
     const q = new THREE.Vector3(target.x, 1, target.z).project(camera);
     canopyTarget.value.set(q.x, q.y);
   } else canopyTarget.value.set(-10, -10);
 }
 function updateEdgeCues() {
+  if(introStep<4){$('furnaceDirection').hidden=true;$('raidDirection').hidden=true;return;}
   const rect = renderer.domElement.getBoundingClientRect();
   function place(id, x, z, label, always) {
     const el = $(id), p = new THREE.Vector3(x, 1, z).project(camera);
@@ -795,20 +797,25 @@ function updateEdgeCues() {
   else $('raidDirection').hidden = true;
 }
 function resourceVisualParts(e) {
-  const { x, y, z, b } = e,
-    j = hashJitter(x, y, z);
+  const { x, y, z, b } = e;
+  if(b.t==='wall')return [];
+  if(b.t==='leaf'){
+    // One snow-laden spruce silhouette per trunk, rather than a flat cross of leaves.
+    if(blockAt(x,y-1,z)?.t!=='wood')return [];
+    return [
+      [0,-.65,0,2.6,.8,2.6,0x234b58],
+      [0,-.16,0,2.55,.23,2.55,0xd5e8eb],
+      [0,.03,0,1.9,.85,1.9,0x315f68],
+      [0,.53,0,1.88,.25,1.88,0xe4f0ec],
+      [0,.74,0,1.1,.83,1.1,0x3e7277],
+      [0,1.21,0,1.05,.22,1.05,0xeaf4ef],
+      [0,1.46,0,.44,.46,.44,0xd6e9e8],
+    ];
+  }
   if (b.t === "wood")
     return [
       [0, 0, 0, 0.44, 1, 0.44, 0x92623e],
       [0.23, 0.13, 0, 0.06, 0.53, 0.36, 0xc08b56],
-    ];
-  if (b.t === "leaf")
-    return [
-      [-0.23, -0.03, -0.23, 0.48, 0.6 * j, 0.48, 0x416e76],
-      [0.23, 0.04, -0.23, 0.48, 0.72 * j, 0.48, 0x4f8187],
-      [-0.23, 0.08, 0.23, 0.48, 0.65 * j, 0.48, 0x568891],
-      [0.23, -0.03, 0.23, 0.48, 0.55 * j, 0.48, 0x3e6971],
-      [0, 0.4, 0, 0.86, 0.13, 0.84, 0xe4f2f6],
     ];
   if (b.t === "coal")
     return [
@@ -872,6 +879,13 @@ function sfx(name) {
   const now = performance.now();
   if (lastSfx[name] && now - lastSfx[name] < 45) return;
   lastSfx[name] = now;
+  if(name==='complete'){
+    tone(92,.16,'sine',.16,.55);
+    tone(392,.11,'triangle',.09,1);
+    setTimeout(()=>tone(587,.24,'sine',.09),80);
+    setTimeout(()=>tone(784,.32,'sine',.065),150);
+    return;
+  }
   if (name === "victory") {
     [262, 330, 392, 523, 659].forEach((n, i) =>
       setTimeout(() => tone(n, 0.42, "triangle", 0.12), i * 95),
@@ -974,11 +988,11 @@ function burst(x, y, z, hex, n = 8) {
   }
 }
 
-function spawnPickupTrail(x, y, z, colorHex, count, target) {
+function spawnPickupTrail(x, y, z, colorHex, count, target, scale=1) {
   for (let i = 0; i < count && flyPickups.length < 128; i++) {
     const mesh =
       pickupPool.pop() || new THREE.Mesh(pickupGeometry, pickupMaterial);
-    const size = 0.19 + Math.random() * 0.05;
+    const size = (.19 + Math.random() * .05)*scale;
     mesh.visible = true;
     mesh.scale.set(size, size, colorHex === 0xe3ba79 ? size * 1.7 : size);
     mesh.material =
@@ -1043,6 +1057,7 @@ function updateParticles(dt) {
   updatePickups(dt);
   updateDeathEffects(dt);
   updateVoxelBreakup(dt);
+  updatePresentation(dt);
 }
 
 function worldPop(textMsg, pos, color = "#fff") {
@@ -1121,6 +1136,9 @@ function updatePickups(dt) {
   }
 }
 function spawnDeathEffect(e) {
+  const emphasis=e.kind==='boss'||enemies.length<=1;
+  if(emphasis)impactPulse(e.model.g.position.x,e.model.g.position.z,0xffd496,1.8);
+  spawnVoxelBreakup(e.model.g.position.x,1,e.model.g.position.z,0x8fc1d1,settings.motion?(emphasis?8:3):2);
   if (deathEffects.length >= 24) {
     disposeObject(e.model.g);
     return;
@@ -1149,7 +1167,7 @@ function spawnDeathEffect(e) {
     1,
     g.position.z,
     e.kind === "boss" ? 0xff8a5b : 0xd7e6ff,
-    e.kind === "boss" ? 18 : 8,
+    emphasis ? 10 : 3,
   );
 }
 function updateDeathEffects(dt) {
@@ -1168,6 +1186,7 @@ function updateDeathEffects(dt) {
   }
 }
 function resetEffects() {
+  resetPresentation();
   resetFeedback();
   for (const p of flyPickups) recyclePickup(p);
   flyPickups = [];
@@ -1333,14 +1352,14 @@ function showResourceDelivery(cost, x, z) {
   // Call only AFTER the authoritative transaction succeeds. Visual packets never charge.
   for (const type of ["wood", "coal", "iron"]) {
     if (!(cost[type] > 0)) continue;
-    const count = Math.min(4, Math.ceil(cost[type] / 10));
+    const count = Math.min(3, Math.ceil(cost[type] / 15));
     for (let i = 0; i < count && flyPickups.length < 128; i++) {
       const mesh =
         pickupPool.pop() || new THREE.Mesh(pickupGeometry, pickupMaterial);
       mesh.material =
         pickupMaterials.get(cargoColors[type]) ||
         makePickupMaterial(cargoColors[type]);
-      mesh.scale.set(type === "wood" ? 0.35 : 0.22, 0.2, 0.22);
+      mesh.scale.set(type === "wood" ? .78 : .43, .34, .37);
       const from = pPos.clone().add(new THREE.Vector3(0, 1.05, 0));
       mesh.position.copy(from);
       mesh.visible = false;
@@ -1351,7 +1370,7 @@ function showResourceDelivery(cost, x, z) {
         from,
         target: new THREE.Vector3(x, 1, z),
         age: -i * 0.07,
-        duration: 0.45,
+        duration: 0.65,
       });
     }
   }
@@ -1401,6 +1420,183 @@ function resetFeedback() {
   harvestSwing = cargoBounce = 0;
   if (voxelDebris) voxelDebris.count = 0;
   if (actionStrip) actionStrip.visible = false;
+}
+
+
+// ---- presentation ----
+// Shared visual language: glacier blue, deep spruce and warm brass.
+// Scenic meshes never enter the logical world or collision/resource maps.
+let scenicWorld = null;
+let wallConnectionMesh = null;
+function wallLinks(){
+  const links=[];
+  for(const [k,st] of defenseState){
+    if(st.type!=='wall')continue;
+    const [x,,z]=k.split(',').map(Number),vertical=Math.abs(x)>=Math.abs(z),step=vertical?6:5;
+    const other=defenseState.get(key(x+(vertical?0:step),1,z+(vertical?step:0)));
+    if(other?.type!=='wall')continue;
+    links.push({k,x:x+(vertical?0:step/2),z:z+(vertical?step/2:0),w:vertical?1:step-4,d:vertical?step-4:1});
+  }return links;
+}
+function wallConnectorAt(x,z,padding=0){
+  return wallLinks().find(a=>Math.abs(x-a.x)<=a.w/2+padding && Math.abs(z-a.z)<=a.d/2+padding)||null;
+}
+function updateWallConnections(){
+  const links=wallLinks();
+  if(!wallConnectionMesh){
+    wallConnectionMesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshLambertMaterial(),40);
+    wallConnectionMesh.frustumCulled=false;scene.add(wallConnectionMesh);
+  }
+  let n=0;
+  for(const a of links){
+    for(const [y,h,c] of [[.9,.85,0x8c7659],[1.45,.18,0x365765],[1.62,.16,0xe7f0e7]]){
+      feedbackDummy.position.set(a.x,y,a.z);feedbackDummy.rotation.set(0,0,0);feedbackDummy.scale.set(a.w+.05,h,a.d+.05);feedbackDummy.updateMatrix();
+      wallConnectionMesh.setMatrixAt(n,feedbackDummy.matrix);wallConnectionMesh.setColorAt(n++,new THREE.Color(c));
+    }
+  }
+  wallConnectionMesh.count=n;wallConnectionMesh.instanceMatrix.needsUpdate=true;
+  if(wallConnectionMesh.instanceColor)wallConnectionMesh.instanceColor.needsUpdate=true;
+}
+const impactRings = [], arrivalModels = [];
+let guideLastStep = -1, guideCelebrateUntil = 0;
+function buildSnowHorizon() {
+  if (scenicWorld) return;
+  scenicWorld = new THREE.Group();
+  const defs = [[0,-.45,0,240,1.898,240,0xf2f6fb]];
+  const rand = n => {const v=Math.sin(n*127.1+47.7)*43758.5453;return v-Math.floor(v);};
+  for(let i=0;i<160;i++){
+    const a=i*2.39996, r=43+rand(i)*45, x=Math.cos(a)*r,z=Math.sin(a)*r;
+    const h=.4+rand(i+400)*1.1;
+    defs.push([x,h*.5,z,5+rand(i+7)*10,h,5+rand(i+27)*9,0xd4e5ea]);
+    if(i%2===0){
+      defs.push([x,h+1,z,.6,2,.6,0x5a716e]);
+      for(let j=0;j<3;j++){
+        const w=3.2-j*.9;
+        defs.push([x,h+2+j*.8,z,w,.95,w,0x386671]);
+        defs.push([x,h+2.51+j*.8,z,w*.85,.15,w*.85,0xe5f1ed]);
+      }
+    }
+  }
+  for(let i=0;i<28;i++){
+    const a=i*Math.PI*2/28,h=12+rand(i+900)*18;
+    defs.push([Math.cos(a)*100,h/2,Math.sin(a)*100,14,h,14,0x8eaebb]);
+    defs.push([Math.cos(a)*100,h+1,Math.sin(a)*100,9,3,9,0xd4e6ed]);
+  }
+  for(let i=0;i<132;i++){
+    const side=i%4,along=-32+(i%33)*2.0,offset=29.5+rand(i+1200)*10;
+    const x=side<2?along:(side===2?offset:-offset),z=side<2?(side===0?offset:-offset):along;
+    const h=2.6+rand(i+1500)*2.1;
+    defs.push([x,.75,z,2.3,.5,2.1,0xe5f0eb],[x,1.5,z,.48,2.1,.48,0x5b706c]);
+    for(let j=0;j<3;j++){
+      const w=2.8-j*.75;defs.push([x,1.7+j*.8,z,w,h*.24,w,0x315b68],[x,2.08+j*.8,z,w*.93,.22,w*.93,0xe4f0ec]);
+    }
+    if(i%3===0)defs.push([x-1.1,.75,z-.7,1.4,1.1,1.3,0x76939f],[x-1.1,1.34,z-.7,1.5,.2,1.4,0xeaf4ed]);
+  }
+  // Boundary markers share the scenery draw, rather than adding 72 draw calls.
+  for(let i=-24;i<=24;i+=6)for(const [x,z] of [[i,27.8],[i,-27.8],[27.8,i],[-27.8,i]]){
+    defs.push([x,.9,z,.22,1.05,.22,0x64818a],[x,1.5,z,.42,.18,.42,0xf0efe0]);
+    const side=Math.abs(x)>27, h=.35+rand(i+2300)*.4;
+    defs.push([x+(side?Math.sign(x)*.45:0),.48+h/2,z+(side?0:Math.sign(z)*.45),side?2.3:4.6,h,side?4.6:2.3,0xd6e7e8]);
+    defs.push([x+(side?Math.sign(x)*.55:0),.5+h,z+(side?0:Math.sign(z)*.55),side?2.2:4.4,.16,side?4.4:2.2,0xf1f7ee]);
+  }
+  const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshLambertMaterial(),defs.length);
+  const dummy=new THREE.Object3D();
+  defs.forEach(([x,y,z,w,h,d,c],i)=>{dummy.position.set(x,y,z);dummy.scale.set(w,h,d);dummy.rotation.y=0;dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);mesh.setColorAt(i,new THREE.Color(c));});
+  mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();scenicWorld.add(mesh);
+  scene.add(scenicWorld);
+  // A compact stone hearth and worn paths, not a flat circular clearing.
+  const hearth=[];
+  const add=(x,y,z,w,h,d,c)=>hearth.push([x,y,z,w,h,d,c]);
+  add(0,.555,0,4.7,.1,4.1,0xa3a19a);
+  add(0,.63,0,3.4,.18,3.2,0x4d6870);
+  add(0,.755,0,2.9,.1,2.7,0x7b8274);
+  for(const sign of [-1,1])for(let j=0;j<4;j++){
+    const z=sign*(2.7+j*.9);
+    add(Math.sin(j*2)*.09,.54,z,1.45,.065,1.2,0xc7c7b7);
+    for(const side of [-1,1]){
+      add(side*(.94+j*.035),.65,z,.48,.26,1.25,0xdcebea);
+      add(side*(1.03+j*.035),.81,z,.56,.1,1.15,0xf4f7ee);
+    }
+  }
+  for(let i=0;i<12;i++){
+    const a=i*Math.PI/6,x=Math.cos(a)*2.8,z=Math.sin(a)*2.6;
+    if(Math.abs(x)<1.2)continue;
+    add(x,.7,z,1,.35,.8,0xd4e6e7);add(x,.92,z,.95,.13,.78,0xf1f7ef);
+  }
+  // A single purposeful wood store at the hearth's side.
+  for(let j=0;j<3;j++)for(let i=0;i<3-j;i++)add(-3.2+i*.25,.68+j*.22,.2,.22,.22,1.15,0x946c42);
+  add(-2.95,1.43,.2,1.15,.16,1.35,0x365865);add(-2.95,1.56,.2,1.2,.1,1.4,0xebf1e8);
+  const masonry=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshLambertMaterial(),hearth.length);
+  hearth.forEach(([x,y,z,w,h,d,c],i)=>{dummy.position.set(x,y,z);dummy.scale.set(w,h,d);dummy.rotation.set(0,0,0);dummy.updateMatrix();masonry.setMatrixAt(i,dummy.matrix);masonry.setColorAt(i,new THREE.Color(c));});
+  masonry.instanceMatrix.needsUpdate=true;masonry.computeBoundingSphere();scenicWorld.add(masonry);
+
+}
+function impactPulse(x,z,color=0xffcf82,size=2) {
+  if(impactRings.length>=12)return;
+  const ring=makeRing(1,color,.5);ring.position.set(x,.57,z);scene.add(ring);
+  impactRings.push({ring,age:0,size});
+}
+function celebrateBuild(p) {
+  const g=(p.type==='wall'?wallDecorObjs:p.type==='turret'?turretObjs:p.type==='flame'?flameObjs:warehouseObjs).get(key(p.x,1,p.z));
+  if(g && settings.motion) arrivalModels.push({g,age:0,scale:g.scale.clone()});
+  impactPulse(p.x,p.z,0xffd18b,2.7);
+  spawnVoxelBreakup(p.x,.8,p.z,0xe6f1e9,settings.motion?14:4);
+  if(settings.motion)shake=Math.max(shake,.75);
+  sfx('complete');haptic(24);
+}
+function updatePresentation(dt) {
+  for(let i=arrivalModels.length-1;i>=0;i--){
+    const a=arrivalModels[i];a.age+=dt;
+    const q=Math.min(1,a.age/.48),bounce=settings.motion?Math.sin(q*Math.PI*2)*Math.exp(-q*4)*.18:0;
+    a.g.scale.set(a.scale.x*(1-bounce*.3),a.scale.y*(1+bounce),a.scale.z*(1-bounce*.3));
+    if(q===1){a.g.scale.copy(a.scale);arrivalModels.splice(i,1);}
+  }
+  for(let i=impactRings.length-1;i>=0;i--){
+    const a=impactRings[i];a.age+=dt;const q=a.age/.55;
+    a.ring.scale.setScalar(settings.motion?.7+q*a.size:1.4);
+    a.ring.material.opacity=Math.max(0,(1-q)*.42);
+    if(q>=1){disposeObject(a.ring);impactRings.splice(i,1);}
+  }
+  updateWallConnections();
+  for(const p of buildPads)p.g.visible=!p.built&&!p.constructing&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<11&&(introStep>=4||(introStep===2&&p.x===-8&&p.z===8));
+  for(const [k,g] of wallDecorObjs){
+    if(!g.userData.gates)continue;
+    const [x,,z]=k.split(',').map(Number);
+    const near=Math.hypot(pPos.x-x,pPos.z-z)<3;
+    g.userData.open=(g.userData.open||0)+((near?1:0)-(g.userData.open||0))*Math.min(1,dt*12);
+    g.userData.gates.forEach((leaf,i)=>leaf.rotation.y=(i===0?-1:1)*g.userData.open*1.5);
+  }
+}
+function resetPresentation(){
+  if(wallConnectionMesh)wallConnectionMesh.count=0;
+  impactRings.forEach(a=>disposeObject(a.ring));impactRings.length=0;
+  arrivalModels.forEach(a=>a.g.scale.copy(a.scale));arrivalModels.length=0;
+  guideLastStep=-1;guideCelebrateUntil=0;
+}
+function updateIntroGuide(){
+  const el=$('introCard'),active=running&&introStep<4;
+  el.hidden=!active;
+  $('gameViewport').setAttribute('data-intro',active?'true':'false');
+  if(!active)return;
+  const step=introStep<2?0:introStep===2?1:2;
+  if(guideLastStep!==step){
+    if(guideLastStep>=0){guideCelebrateUntil=gameElapsed+1.2;sfx('complete');}
+    guideLastStep=step;
+  }
+  const close=objectiveTarget&&Math.hypot(pPos.x-objectiveTarget.x,pPos.z-objectiveTarget.z)<1.4;
+  const assembling=constructionSites.some(s=>s.p.type==='turret');
+  const titles=['木に向かって歩こう',assembling?'見張り台を組み立て中':close?'ここで指を離そう':'光る床まで歩こう','炉のそばへ戻ろう'];
+  const notes=['画面のどこでも、指を滑らせて移動','止まると木材40を届けて建築','これで準備完了。最初の夜を迎えよう'];
+  $('introNumber').textContent=`${step+1} / 3`;
+  $('introTitle').textContent=gameElapsed<guideCelebrateUntil?(step===1?'採集できた！':'見張り台が完成！'):titles[step];
+  $('introHelp').textContent=notes[step];
+  const hand=$('gestureGuide');hand.hidden=step===2||assembling;
+  hand.setAttribute('data-release',close?'true':'false');
+  if(objectiveTarget){
+    const rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(objectiveTarget.x,1.5,objectiveTarget.z).project(camera);
+    hand.style.left=Math.max(50,Math.min(rect.width-50,(v.x*.5+.5)*rect.width+36))+'px';
+    hand.style.top=Math.max(210,Math.min(rect.height-250,(-v.y*.5+.5)*rect.height+30))+'px';
+  }
 }
 
 
@@ -1862,9 +2058,10 @@ function chooseNightModifier() {
 // ---- buildings ----
 // buildings system — v12, integrated from the deployed v11.
 
-function typeName(t) {
+function isGateWall(x,z){return x===0 || (Math.abs(x)===8 && z===-3);}
+function typeName(t,x,z) {
   return t === "wall"
-    ? "木柵"
+    ? (isGateWall(x,z)?"通用門":"防壁")
     : t === "turret"
       ? "見張り台"
       : t === "flame"
@@ -1916,6 +2113,10 @@ function addBuildPads() {
     // One footprint outline, at the actual building location. No second disc or offset marker.
     const g = new THREE.Group();
     g.position.set(x, 0, z);
+    const sign=box(.85,.58,.13,0x315361);sign.position.set(.2,1.15,.1);g.add(sign);
+    const peg=box(.12,.9,.12,0xa88658);peg.position.set(.2,.8,.1);g.add(peg);
+    const mark=box(.4,.08,.04,0xffd48a);mark.position.set(.2,1.15,.19);g.add(mark);
+    for(let j=0;j<3;j++){const log=box(.7,.17,.18,0xb98c55);log.position.set(-.55,.65+j*.16,.15);g.add(log);}
     scene.add(g);
     const tag = makeGroundTag(typeIcon(type), "");
     tag.position.set(x, 0.56, z);
@@ -1972,57 +2173,27 @@ function addWallDecor(x, y, z, level = 1) {
     disposeObject(wallDecorObjs.get(k));
     wallDecorObjs.delete(k);
   }
-  const g = new THREE.Group(),
-    tangent = Math.abs(x) >= Math.abs(z) ? "z" : "x";
-  for (let i = -4; i <= 4; i++) {
-    const post = box(0.26, 1.75, 0.26, level >= 3 ? 0xd8b06d : 0x8b5c32);
-    post.position.y = 1.05;
-    if (tangent === "x") post.position.x = i * 0.45;
-    else post.position.z = i * 0.45;
-    g.add(post);
-    const tip = box(0.19, 0.32, 0.19, 0xe3c084);
-    tip.position.copy(post.position);
-    tip.position.y = 2.08;
-    tip.rotation.z = 0.18;
-    g.add(tip);
+  const g = new THREE.Group();
+  // Local X follows the wall. Two hinged doors form a readable, player-only passage.
+  if(Math.abs(x)>=Math.abs(z))g.rotation.y=Math.PI/2;
+  if(!isGateWall(x,z)){
+    for(let i=-4;i<=4;i++){const post=box(.32,1.65,.38,0x866d51);post.position.set(i*.44,.85,0);g.add(post);const snow=box(.36,.15,.45,0xe0ece7);snow.position.set(i*.44,1.75,0);g.add(snow);}
+    for(const height of [.55,1.2]){const rail=box(4,.15,.48,0x375864);rail.position.y=height;g.add(rail);}
+    g.position.set(x,y-.5,z);scene.add(g);wallDecorObjs.set(k,g);return;
   }
-  const rail1 = box(
-    tangent === "x" ? 3.9 : 0.22,
-    0.18,
-    tangent === "x" ? 0.22 : 3.9,
-    0x694421,
-  );
-  rail1.position.y = 1.05;
-  g.add(rail1);
-  const rail2 = rail1.clone();
-  rail2.position.y = 1.55;
-  g.add(rail2);
-  if (level >= 2) {
-    const cap = box(
-      tangent === "x" ? 4 : 0.3,
-      0.14,
-      tangent === "x" ? 0.3 : 4,
-      0xd5a35e,
-    );
-    cap.position.y = 1.92;
-    g.add(cap);
+  for(const side of [-1,1]){
+    const post=box(.36,2.05,.5,0x42636a);post.position.set(side*1.15,1,0);g.add(post);
+    const cap=box(.52,.2,.65,0xe3efe9);cap.position.set(side*1.15,2.08,0);g.add(cap);
+    const wing=box(.66,1.35,.35,0x927050);wing.position.set(side*1.65,.75,0);g.add(wing);
+    const leaf=new THREE.Group();leaf.position.set(side*.98,0,0);
+    const panel=box(.96,1.45,.18,level>=3?0xbb9760:0x94724d);
+    panel.position.set(-side*.48,.82,0);leaf.add(panel);
+    const brace=box(.86,.15,.24,0xe2b96b);brace.position.set(-side*.48,.88,0);leaf.add(brace);
+    g.add(leaf);(g.userData.gates ||= []).push(leaf);
   }
-  if (level >= 3) {
-    const banner = box(0.2, 0.8, 0.06, 0x6fa9ff);
-    banner.position.set(
-      tangent === "x" ? 1.15 : 0.15,
-      2.45,
-      tangent === "x" ? 0.15 : 1.15,
-    );
-    g.add(banner);
-  }
-  const f = defenseFootprint("wall", x, z),
-    foundation = box(f.width, 0.1, f.depth, 0x72543a);
-  foundation.position.y = 0.05;
-  g.add(foundation);
-  g.position.set(x, y - 0.5, z);
-  scene.add(g);
-  wallDecorObjs.set(k, g);
+  const arch=box(2.7,.28,.58,0x395964);arch.position.y=2.26;g.add(arch);
+  const light=box(.42,.34,.15,0xffcd79);light.position.set(0,2.3,.36);g.add(light);
+  g.position.set(x,y-.5,z);scene.add(g);wallDecorObjs.set(k,g);
 }
 
 function addFlameVisual(x, y, z, level = 1) {
@@ -2371,7 +2542,8 @@ function solidAt(x, z) {
     if (Math.abs(x - bx) <= f.width / 2 && Math.abs(z - bz) <= f.depth / 2)
       return blockAt(bx, by, bz);
   }
-  return null;
+  const link=wallConnectorAt(x,z);
+  return link?blocks.get(link.k):null;
 }
 
 function nearestFreePosition(x, z) {
@@ -3018,11 +3190,12 @@ function updateEnemies(dt, t) {
       g = e.model.g;
     if (e.hp <= 0) {
       if (e.kind === "boss") bossDefeated = true;
-      burst(g.position.x, 1, g.position.z, 0xff5544, 12);
       spawnDeathEffect(e);
       enemies.splice(i, 1);
       wood += 4;
       coal += 2;
+      spawnPickupTrail(g.position.x,1.2,g.position.z,0xe3ba79,2,player.position.clone(),enemies.length===0||e.kind==='boss'?2.7:2);
+      spawnPickupTrail(g.position.x,1.2,g.position.z,0x8ea4c4,1,player.position.clone(),2);
       kills++;
       combo++;
       comboT = 2.2;
@@ -3670,12 +3843,12 @@ function updatePadTag(p) {
       ? " 建築中"
       : p.rebuilding
         ? " 再建"
-        : " " + typeName(p.type));
+        : " " + typeName(p.type,p.x,p.z));
   setGroundTag(
     p.tag,
     title,
     p.constructing
-      ? constructionSites.find((s) => s.p === p)?.t >= 0.78
+      ? constructionSites.find((s) => s.p === p)?.t >= 1.2
         ? "離れると完成"
         : "組み立て中"
       : locked
@@ -3795,6 +3968,7 @@ function projectGroundTags(t) {
           : "#50677a",
     );
     el.style.visibility = "hidden";
+    if(phase === "night"){ring.visible=false;continue;}
     const nearbyPad =
       pad &&
       !built &&
@@ -3802,7 +3976,7 @@ function projectGroundTags(t) {
       Math.hypot(g.position.x - pPos.x, g.position.z - pPos.z) < 11 &&
       nearestLabels.includes(g) &&
       introStep >= 3;
-    if (!selected || actionFocus) continue;
+    if (!selected || actionFocus || constructionSites.some(s => s.p.tag === g)) continue;
     labelVector.copy(g.position).project(camera);
     const x = rect.left + (labelVector.x * 0.5 + 0.5) * rect.width,
       y = rect.top + (-labelVector.y * 0.5 + 0.5) * rect.height;
@@ -3891,9 +4065,14 @@ function nearestBuildPad() {
 function playerCollidesAt(x, z) {
   for (const [k, st] of defenseState) {
     const [ox, , oz] = k.split(",").map(Number);
+    // The central doorway is wide enough for the player; enemies still use solidAt.
+    if(st.type==='wall' && isGateWall(ox,oz)){
+      const tangent=Math.abs(ox)>=Math.abs(oz)?z-oz:x-ox;
+      if(Math.abs(tangent)<=.72)continue;
+    }
     if (defenseOverlapsPlayer(st.type, ox, oz, x, z)) return true;
   }
-  return false;
+  return !!wallConnectorAt(x,z,PLAYER_RADIUS);
 }
 function restoreBuildPad(x, z) {
   const p = buildPads.find((p) => p.x === x && p.z === z);
@@ -3932,7 +4111,10 @@ function buildFromPad(p) {
         ? [
             [2, 0.12, 2],
             [0.24, 1.45, 0.24],
-            [1.15, 0.18, 1.15],
+            [0.24, 1.45, 0.24],
+            [0.24, 1.45, 0.24],
+            [0.24, 1.45, 0.24],
+            [2, 0.18, 2],
             [0.7, 0.22, 0.24],
           ]
         : p.type === "flame"
@@ -3951,6 +4133,12 @@ function buildFromPad(p) {
   const pieces = dims.map((d, i) => {
     const m = box(...d, buildColor(p.type));
     m.position.y = 0.12 + i * 0.4;
+    m.userData.stage=i;
+    if(p.type==='turret'){
+      m.userData.stage=i===0?0:i<=4?1:i===5?2:3;
+      if(i>=1&&i<=4){m.position.set(i%2?-.75:.75,.75,i<=2?-.75:.75);m.material.color.setHex(0x876b50);}
+      else{m.position.y=i===0?.06:i===5?1.55:1.82;m.material.color.setHex(i===5?0x355765:0x9db8b8);}
+    }
     if (p.type === "wall" && (i === 1 || i === 2)) {
       m.position.x = i === 1 ? -1.75 : 1.75;
       m.position.y = 0.72;
@@ -3962,7 +4150,7 @@ function buildFromPad(p) {
   });
   if (p.type === "wall" && Math.abs(p.x) >= Math.abs(p.z))
     g.rotation.y = Math.PI / 2;
-  constructionSites.push({ p, g, pieces, t: 0, duration: 0.78 });
+  constructionSites.push({ p, g, pieces, t: 0, duration: 1.2 });
   sfx("build");
   updateHUD();
   return true;
@@ -3994,7 +4182,7 @@ function completeSite(s) {
   p.rebuilding = false;
   p.progress = 0;
   burst(p.x, 1, p.z, buildColor(p.type), 10);
-  sfx("upgrade");
+  celebrateBuild(p);
   worldPop(
     typeIcon(p.type) + " 完成",
     new THREE.Vector3(p.x, 1.8, p.z),
@@ -4010,10 +4198,10 @@ function updateBuildPads(dt) {
     s.t += dt;
     const q = Math.min(1, s.t / s.duration);
     s.pieces.forEach((m, j) => {
-      const st = Math.max(0, Math.min(1, (q - j * 0.16) / 0.28)),
+      const st = Math.max(0, Math.min(1, (q - m.userData.stage * 0.22) / 0.25)),
         e = 1 - Math.pow(1 - st, 3);
       m.scale.setScalar(e);
-      m.position.y = m.userData.y + Math.sin(st * Math.PI) * 0.06;
+      m.position.y = m.userData.y + (settings.motion ? (1-st)*.55 : 0);
     });
     if (q >= 1 && completeSite(s)) constructionSites.splice(i, 1);
   }
@@ -4186,16 +4374,15 @@ function initExperience() {
     guideRing = makeRing(1.25, 0xffc568, 0.95);
     scene.add(guideRing);
     campGlow = new THREE.Mesh(
-      new THREE.CircleGeometry(4.2, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0xffbd69,
-        transparent: true,
-        opacity: 0.12,
-        depthWrite: false,
+      new THREE.CircleGeometry(5.3, 48),
+      new THREE.ShaderMaterial({
+        uniforms:{strength:{value:.28}},transparent:true,depthWrite:false,
+        vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+        fragmentShader:'varying vec2 vUv;uniform float strength;void main(){float a=pow(max(0.,1.-length(vUv-.5)*2.),1.7);gl_FragColor=vec4(1.,.59,.22,a*strength);}'
       }),
     );
     campGlow.rotation.x = -Math.PI / 2;
-    campGlow.position.y = 0.52;
+    campGlow.position.y = 0.82;
     scene.add(campGlow);
     dangerRing = makeRing(2.5, 0xff625b, 0.95);
     scene.add(dangerRing);
@@ -4230,8 +4417,8 @@ function actionCandidates() {
     add(
       {
         id: `build:${p.index}`,
-        title: typeName(p.type) + "を建てる",
-        effect: buildingBenefit(p.type),
+        title: typeName(p.type,p.x,p.z) + "を建てる",
+        effect: buildingBenefit(p.type,p.x,p.z),
         cost: getBuildCost(p),
         x: p.x,
         z: p.z,
@@ -4309,14 +4496,15 @@ function actionCandidates() {
       for (const [k, st] of defenseState) {
         if (st.level >= MAX_DEF_LV) continue;
         const [x, y, z] = k.split(",").map(Number);
+        if(st.type==="wall" && isGateWall(x,z) && Math.abs(Math.abs(x)>=Math.abs(z)?pPos.z-z:pPos.x-x)<1.4)continue;
         add(
           {
             id: "upgrade:" + k,
-            title: typeName(st.type) + ` Lv.${st.level + 1}`,
+            title: typeName(st.type,x,z) + ` Lv.${st.level + 1}`,
             effect:
               st.type === "wall"
                 ? "耐久アップ＋全回復"
-                : "火力・射程アップ＋全回復",
+                : st.type === "turret" && st.level === 1 ? "炉のそばまで射程拡大・全回復" : "火力・射程アップ＋全回復",
             cost: getUpgradeCost(st),
             x,
             z,
@@ -4330,9 +4518,9 @@ function actionCandidates() {
   }
   return list.sort((a, b) => a.distance - b.distance);
 }
-function buildingBenefit(type) {
+function buildingBenefit(type,x,z) {
   return {
-    wall: "敵を食い止める / 耐久220",
+    wall: isGateWall(x,z)?"自分は通過 / 敵を止める門":"敵を止める / 門とつなげて防衛",
     turret: "近くの敵を自動射撃",
     flame: "群れをまとめて攻撃",
     warehouse: "毎朝の支給が増える",
@@ -4371,13 +4559,14 @@ function updateDwell(dt) {
         : movementRequested()
           ? "ここで指を離すと開始"
           : "そのまま待つと確定 / 移動で中断";
+  $("actionTrack").hidden = !available;
   $("actionFill").style.width =
     Math.min(100, (actionTime / DWELL_SECONDS) * 100) + "%";
   if (actionTime >= DWELL_SECONDS && !actionLatched) {
     if (candidate.apply()) {
       actionLatched = true;
       defenseActionConsumed = true;
-      lastReceipt = `${candidate.title}：${costWords(candidate.cost)}を使用`;
+      lastReceipt = `消費：${costWords(candidate.cost)}`;
       receiptUntil = gameElapsed + 4;
       toast(lastReceipt);
       haptic(20);
@@ -4424,6 +4613,7 @@ function updateJourney(dt) {
     title = `次の襲撃：${r[0]} / ${nextRaid.direction}${currentStage === 3 ? "＋反対側" : "から"}`;
     title = coal < 20 ? "夜に備えて石炭を集めよう" : "襲撃に備えて集落を整えよう";
     sub = coal < 20 ? `石炭 ${coal | 0} / 20 · 炉の補給2回分` : `${nextRaid.direction}から ${r[0]}`;
+    if(baseHP<baseMax*.85){title="夜までに炉を修理しよう";sub="木材30・石炭5 / 炉の奥で止まる";objectiveTarget={x:0,z:-2.5};}
   } else {
     title = day === 7 ? "霜翼竜を退けよう" : "炉を守り抜こう";
     sub =
@@ -4469,11 +4659,12 @@ function updateJourney(dt) {
     saveRun();
   }
   updateAmbience(dt);
+  updateIntroGuide();
 }
 function updateWaypoint() {
   updateEdgeCues();
   const el = $("waypoint");
-  el.hidden = !objectiveTarget || !running;
+  el.hidden = !objectiveTarget || !running || constructionSites.length > 0;
   if (el.hidden) return;
   const rect = renderer.domElement.getBoundingClientRect(),
     v = new THREE.Vector3(objectiveTarget.x, 1.8, objectiveTarget.z).project(
