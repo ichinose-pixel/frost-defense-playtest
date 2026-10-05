@@ -1267,3 +1267,30 @@ body{font-family:system-ui,-apple-system,"Yu Gothic",sans-serif;color:var(--ice)
 #equipmentOptions button,#expeditionOptions button{display:flex;align-items:center;gap:12px;min-height:72px;padding:10px 12px} .choiceArt{width:44px;height:44px;flex:0 0 44px;filter:drop-shadow(0 2px 2px #0018)}#equipmentOptions span,#expeditionOptions span{display:grid;gap:3px}#equipmentOptions b,#expeditionOptions b{font-size:17px;color:#f3e7ce}#equipmentOptions small,#expeditionOptions small{font-size:12px;color:#bfd5dd;line-height:1.45}#equipmentPrice,#expeditionSummary{font-size:12px!important;line-height:1.55!important;min-height:36px}#equipmentNote{margin:0 0 10px!important;color:#b8cdd5}#equipmentPanel,#expeditionPanel{padding:18px}#equipmentOptions button:last-child:has(+p){min-height:44px}
 
 #equipmentOptions{gap:4px}#equipmentOptions button{min-height:60px;padding:6px 10px;margin:2px 0}#equipmentOptions .choiceArt{width:36px;height:36px;flex-basis:36px}#equipmentOptions button:last-child{min-height:44px}#equipmentPanel{inset:7% 14px auto;max-height:88%}#equipmentPanel #equipmentPrice{margin:8px 0}
+/* v41: one nearby transaction, explicit fresh tap, no persistent instruction stack. */
+#actionPanel {position:absolute;bottom:auto!important;transform:none!important;box-sizing:border-box;padding:9px!important;border-radius:15px;background:rgba(12,34,47,.94);border:1px solid #a3cdd35c;pointer-events:auto;z-index:25;}
+#actionPanel .contextHead {display:flex;align-items:center;gap:5px;}
+#actionTitle {flex:1;font-size:13px;line-height:1.3;}
+.contextHead button {min-width:32px;min-height:32px;padding:3px;border-radius:9px;background:#ffffff12;color:#d7f0f1;border:1px solid #ffffff24;font-size:19px;}
+#confirmDefense {width:100%;min-height:43px;margin-top:5px;font-size:13px;}
+#actionCost {font-size:11px;line-height:1.4;margin:4px 0;}
+#contextPause {display:block;color:#ffda95;font-size:10px;margin:4px 0;}
+#contextOptions {display:flex;gap:4px;flex-wrap:wrap;margin:5px 0;}
+#contextOptions button {flex:1;min-height:40px;padding:6px;font-size:11px;border:1px solid #94bcc45e;border-radius:9px;background:#355565;color:#eefcff;}
+#contextOptions button:disabled {opacity:.4;}
+#actionPanel:has(#contextExchange:not([hidden])) #contextOptions button {flex-basis:100%;text-align:left;}
+#routeChoices {position:absolute;bottom:calc(14px + env(safe-area-inset-bottom));left:12px;right:12px;display:flex;gap:5px;z-index:22;}
+#routeChoices button {flex:1;min-height:42px;border-radius:11px;background:#173645d9;color:#e3f1ec;border:1px solid #9ec2c44f;padding:5px;font-size:10px;}
+#routeChoices button:disabled {opacity:.35;}
+#engineerCharge {position:absolute;bottom:calc(20px + env(safe-area-inset-bottom));left:16px;color:#ffda8b;font-size:12px;pointer-events:none;z-index:22;background:#173645;padding:5px 8px;border-radius:8px;}
+#journeySub,#fuelStation,#baseStation,#repairStation,#outpostCard {display:none!important;}
+#journey {padding:6px 10px!important;min-height:0!important;}
+#journeyTitle {font-size:12px!important;}
+#contextOptions[hidden],#contextPause[hidden],#routeChoices[hidden],#engineerCharge[hidden],#actionCost[hidden] {display:none!important;}
+#actionPanel #actionTitle{font-size:13px}#actionPanel #contextPause{font-size:10px}
+#contextOptions button{display:flex;flex-direction:column;align-items:center;gap:3px}#contextOptions .choiceArt{width:27px;height:30px;flex:0 0 27px}#contextOptions button span{font-size:11px;margin:0}
+#actionPanel:has(#contextExchange:not([hidden])) #contextOptions button{flex-direction:row;text-align:left}
+#gestureGuide[data-tap="true"]{z-index:28}#gestureGuide[data-tap="true"] i{animation:contextTap 2.3s infinite}
+@keyframes contextTap{0%,20%{transform:translate(-28px,12px) rotate(-20deg);opacity:.7}42%,58%{transform:translate(0,-12px) rotate(-20deg);opacity:.35}70%,80%{transform:translate(0,0) rotate(-20deg);opacity:1}100%{transform:translate(0,-8px) rotate(-20deg);opacity:.3}}
+#gameViewport[data-motion="false"] #gestureGuide[data-tap="true"] i{animation:none}
+@media(prefers-reduced-motion:reduce){#gestureGuide[data-tap="true"] i{animation:none}}

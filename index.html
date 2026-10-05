@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>フロスト・ディフェンス — 灯の集落</title>
-    <link rel="stylesheet" href="styles/game.css?v=40" />
+    <link rel="stylesheet" href="styles/game.css?v=41" />
   </head>
   <body>
     <div id="gameViewport">
@@ -35,12 +35,13 @@
         <button id="equipmentCancel" type="button">変更せず戻る</button>
       </section>
       <section id="actionPanel" hidden>
-        <b id="actionTitle"></b><span id="actionCost"></span>
+        <div class="contextHead"><b id="actionTitle"></b><button id="contextExchange" hidden aria-label="設備を交換">↔</button><button id="contextInfo" aria-label="対象の詳細">ⓘ</button><button id="contextClose" hidden aria-label="選択を閉じる">×</button></div><small id="contextPause" hidden>選択中・時間停止　移動で戻る</small><div id="contextOptions" hidden></div><span id="actionCost"></span>
         <div class="dwellTrack" id="actionTrack"><i id="actionFill"></i></div>
         <small id="actionHelp"></small>
         <div id="defenseChoices" hidden aria-label="強化する対象"></div>
         <button id="confirmDefense" hidden type="button">強化する</button>
       </section>
+      <nav id="routeChoices" hidden aria-label="遠征先へ案内"></nav><small id="engineerCharge" hidden></small>
       <button id="outpostCard" hidden><b id="outpostTitle"></b><span id="outpostDetail"></span><small id="outpostRoute"></small></button>
       <section id="dawnPanel" hidden><small id="dawnNight"></small><h2 id="dawnTitle"></h2><p id="dawnDetail"></p><button id="dawnSkip">強化を選ぶ ›</button></section>
       <div id="victoryMoment" hidden></div>
@@ -171,6 +172,6 @@
       </div>
     </div>
     <script src="vendor/three-0.160.0.min.js"></script>
-    <script src="dist/game.js?v=40"></script>
+    <script src="dist/game.js?v=41"></script>
   </body>
 </html>

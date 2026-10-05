@@ -1697,8 +1697,8 @@ function updateIntroGuide(){
   }
   const close=objectiveTarget&&Math.hypot(pPos.x-objectiveTarget.x,pPos.z-objectiveTarget.z)<1.4;
   const assembling=constructionSites.some(s=>s.p.type==='turret');
-  const titles=['木に近づこう',assembling?'組み立て中':close?'指を離して建築':'光る床へ','炉へ戻ろう'];
-  const notes=['指を滑らせて移動','木材40を届ける','最初の夜を迎えよう'];
+  const titles=['木に近づこう',assembling?'組み立て中':close?'建築ボタンをタップ':'光る床へ','炉へ戻ろう'];
+  const notes=['指を滑らせて移動',close?'指を離す → タップ・木材40':'床のそばへ移動','最初の夜を迎えよう'];
   $('introNumber').textContent=`${step+1} / 3`;
   $('introTitle').textContent=gameElapsed<guideCelebrateUntil?(step===1?'採集できた！':'矢塔が完成！'):titles[step];
   $('introHelp').textContent=notes[step];
@@ -4330,6 +4330,7 @@ function bindInput() {
         e.button > 0
       )
         return;
+      cancelContext();
       e.preventDefault();
       window.getSelection?.()?.removeAllRanges();
       joyId = e.pointerId;
@@ -4368,12 +4369,14 @@ function bindInput() {
     if (!running) return;
     if (/^(Key[WASD]|Arrow(Up|Down|Left|Right))$/.test(e.code)) {
       e.preventDefault();
+      cancelContext();
       keys[e.code] = true;
     }
   });
   addEventListener("keyup", (e) => delete keys[e.code]);
-  addEventListener("blur", resetInput);
+  addEventListener("blur", () => {cancelContext();resetInput();});
   document.addEventListener("visibilitychange", () => {
+    cancelContext();
     resetInput();
     clock.getDelta();
     if (document.hidden) audioCtx?.suspend();
@@ -4488,7 +4491,7 @@ function actionCandidates() {
     if (distance <= reach) list.push({ ...a, distance });
   };
   for (const p of buildPads) {
-    if(p.type!=="wall"&&introStep>=3)continue;
+    if(p.type!=="wall")continue;
     if ((phase === "night" && !inNightRespite()) || p.built || p.constructing || baseLevel < requiredBaseLevel(p.type))
       continue;
     if (
@@ -4599,7 +4602,7 @@ function actionCandidates() {
         );
       }
   }
-  return list.sort((a, b) => a.distance - b.distance);
+  return list.map(a=>({...a,manual:true})).sort((a, b) => a.distance - b.distance);
 }
 function buildingBenefit(type,x,z) {
   return {
@@ -4653,55 +4656,9 @@ function updateManualControls(candidates,candidate){
   button.disabled=actionLatched||candidate.available===false||!canAfford(candidate.cost);
 }
 function updateDwell(dt) {
-  const candidates=actionCandidates(),candidate = chooseNearbyAction(candidates);
-  if (movementRequested()) {
-    actionTime = 0;
-    actionLatched = false;
-  }
-  if (actionFocus?.id !== candidate?.id) {
-    actionTime = 0;
-    if(candidate?.manual)actionLatched=false;
-  }
-  actionFocus = candidate;
-  const panel = $("actionPanel");
-  panel.hidden = !candidate || (actionLatched&&!candidate.manual);
-  updateManualControls(candidates,candidate);
-  if (!candidate) return;
-  $("actionTitle").textContent =
-    actionLatched && lastReceipt ? candidate.manual?"強化しました":"届けました" : candidate.title;
-  $("actionCost").textContent =
-    actionLatched && lastReceipt
-      ? lastReceipt
-      : costWords(candidate.cost) + " → " + candidate.effect;
-  const affordable = canAfford(candidate.cost),
-    available = candidate.available !== false;
-  if (!candidate.manual && !movementRequested() && !actionLatched && affordable && available)
-    actionTime += dt;
-  else if (!affordable || !available) actionTime = 0;
-  $("actionHelp").textContent = candidate.manual ? (actionLatched?"強化完了。移動して次の準備へ":!available?"この設備は最大レベルです":!affordable?"資材が足りません。通過だけでは消費しません":"金色の枠が対象。内容を確認してボタンで実行") : actionLatched
-    ? "少し移動して、次の行動へ"
-    : !available
-      ? "燃料は十分。減ったらここで補給"
-      : !affordable
-        ? "資材が足りません。近くの木・石炭を集めよう"
-        : movementRequested()
-          ? "ここで指を離すと開始"
-          : "そのまま待つと確定 / 移動で中断";
-  $("actionTrack").hidden = !available || candidate.manual;
-  $("actionFill").style.width =
-    Math.min(100, (actionTime / DWELL_SECONDS) * 100) + "%";
-  if (!candidate.manual && actionTime >= DWELL_SECONDS && !actionLatched) {
-    if (candidate.apply()) {
-      actionLatched = true;
-      defenseActionConsumed = true;
-      lastReceipt = `消費：${costWords(candidate.cost)}`;
-      receiptUntil = gameElapsed + 4;
-      if(!candidate.id.startsWith("build:")) toast(lastReceipt);
-      haptic(20);
-      saveRun();
-    }
-    actionTime = 0;
-  }
+  actionTime=0;
+  actionFocus=chooseNearbyAction(actionCandidates());
+  updateContextUI();
 }
 function updateJourney(dt) {
   if (introStep === 0 && gatheredWood > 0) {
@@ -4730,7 +4687,7 @@ function updateJourney(dt) {
     title = "2 / 3　矢塔を建てよう";
     sub = first?.constructing
       ? "組み立て中。床の外へ出ると完成"
-      : "光る床のそばで指を離す / 木材40";
+      : "床のそばで指を離し、建築ボタンをタップ";
     objectiveTarget = { x: -6.3, z: 8 };
   } else if (introStep === 3) {
     title = "3 / 3　炉のそばへ戻ろう";
@@ -5370,7 +5327,7 @@ function resumeRun() {
     nightAssault = s.nightAssault ? { ...s.nightAssault } : null;
     if(nightAssault && nightAssault.version!==2){nightAssault.index=assaultIndex();nightAssault.version=2;if(nightAssault.mode==='second')nightAssault.reserve=0;}
     bossFlank = s.bossFlank ? { ...s.bossFlank } : null;
-      campPlan = s.campPlan || "none"; dawnScene=null; trackedOutpost=null; outpostNotice=null;
+      campPlan = s.campPlan || "none"; dawnScene=null; trackedOutpost=['invest','salvage','engineer'].includes(expedition.route)?expeditionSite(expedition.route)?.type:null; outpostNotice=null;
       $("dawnPanel").hidden=true;
     blocks = new Map(s.blocks);
     defenseState.clear();
@@ -5488,6 +5445,7 @@ function resumeRun() {
   }
 }
 function pauseGame() {
+  cancelContext();
   $("gameViewport").classList.remove("choice-open");
   if(!$("expeditionPanel").hidden){expeditionChoice=null;$("expeditionPanel").hidden=true;paused=false;running=pauseWasRunning;}
   if(equipmentDraft){equipmentDraft=null;$("equipmentPanel").hidden=true;paused=false;running=pauseWasRunning;}
@@ -5668,6 +5626,7 @@ function updateNightAssault(dt) {
 }
 
 function update(dt, t) {
+  if(contextChoosing)return;
   if (fuel <= 0 || baseHP <= 0) {
     gameOver(fuel <= 0);
     return;
@@ -6146,11 +6105,13 @@ function equipmentQuote(p,type){
   return {level,cost:{wood:Math.max(0,after.wood-before.wood),coal:Math.max(0,after.coal-before.coal)},refund:{wood:Math.max(0,before.wood-after.wood),coal:Math.max(0,before.coal-after.coal)}};
 }
 function equipmentActions(){
-  if(phase!=='day'||introStep<3)return [];
-  const p=buildPads.filter(p=>p.type!=='wall'&&!p.constructing).map(p=>({p,d:distanceToDefense(p.type,p.x,p.z)})).filter(v=>v.d<=1.4).sort((a,b)=>a.d-b.d)[0]?.p;
+  if(phase!=='day'||introStep<2)return [];
+  const p=buildPads.filter(p=>p.type!=='wall'&&!p.constructing&&(introStep!==2||(p.x===-8&&p.z===8))).map(p=>({p,d:distanceToDefense(p.type,p.x,p.z)})).filter(v=>v.d<=1.4).sort((a,b)=>a.d-b.d)[0]?.p;
   if(!p)return [];
   const st=defenseState.get(key(p.x,1,p.z));
-  return [{id:'equipment:'+p.index,title:st?typeName(st.type)+'を編成':'設備を選ぶ',manual:true,available:true,cost:{},effect:`設備 ${equipmentUsed()}/${equipmentCapacity}枠 · 同レベル交換・差額のみ`,x:p.x,z:p.z,tag:p.tag,button:'設備を選ぶ',apply:()=>{openEquipment(p);return true;},distance:0}];
+  const type=contextChoice?.index===p.index&&contextChoice.type||st?.type||p.type;
+  const c=st?(st.level>=MAX_DEF_LV?{}:getUpgradeCost(st)):getBuildCost({...p,type,cost:EQUIPMENT[type].wood});
+  return [{id:'equipment:'+p.index,title:st?typeName(st.type)+' Lv.'+st.level+' → '+Math.min(MAX_DEF_LV,st.level+1):typeName(type)+'を建てる',manual:true,available:st?st.level<MAX_DEF_LV:equipmentUsed()<equipmentCapacity&&baseLevel>=requiredBaseLevel(type),cost:c,effect:st?'全回復・性能アップ':EQUIPMENT[type].role,x:p.x,z:p.z,tag:p.tag,previewType:type,previewLevel:st?Math.min(MAX_DEF_LV,st.level+1):1,button:st?'強化する':'建てる',apply:()=>{if(st)return upgradeDefense({x:p.x,y:1,z:p.z,state:st});return transactEquipment(p,type);},distance:distanceToDefense(p.type,p.x,p.z)}];
 }
 function openEquipment(p){
   equipmentDraft={index:p.index,type:null};resetInput();pauseWasRunning=running;running=false;paused=true;
@@ -6211,7 +6172,7 @@ function updateSupport(dt){
   }
 }
 
-function resetStrategy(){equipmentCapacity=4;strategyLegacy=false;equipmentDraft=null;$('gameViewport').classList.remove('choice-open');$('equipmentPanel').hidden=true;}
+function resetStrategy(){cancelContext();equipmentCapacity=4;strategyLegacy=false;equipmentDraft=null;$('gameViewport').classList.remove('choice-open');$('equipmentPanel').hidden=true;}
 
 
 // ---- dragon-tactics ----
@@ -6370,7 +6331,7 @@ function renderExpedition(){
 function confirmExpedition(){
  const kind=expeditionChoice;if(!kind||!expedition.pilot||phase!=='day')return false;
  const o=expeditionSite(kind),near=Math.hypot(o.x-pPos.x,o.z-pPos.z)<2.4;
- if(!near){trackedOutpost=o.type;closeExpedition();return true;}
+ if(!near){expedition.route=kind;trackedOutpost=o.type;closeExpedition();return true;}
  if(expedition.work||(kind==='engineer'?expedition.engineer:expedition.facility!=='untouched'))return false;
  const c=expeditionCost(kind);if(!canAfford(c))return false;wood-=c.wood||0;coal-=c.coal||0;
  expedition.work={kind,t:0};closeExpedition();return true;
@@ -6391,12 +6352,16 @@ function updateExpedition(dt){
  if(w.kind==='engineer'){expedition.engineer=true;rescued++;worldPop('技師が加わった · 夜に設備を120修理',o.g.position.clone().add(new THREE.Vector3(0,2,0)),'#ffda88');}
  else if(w.kind==='salvage'){wood+=45;expedition.facility='salvaged';o.g.scale.y=.3;worldPop('解体資材 · 木材45',o.g.position.clone().add(new THREE.Vector3(0,2,0)),'#ffda88');}
  else {expedition.facility='invested';worldPop('製材所を修復 · 翌朝から納品',o.g.position.clone().add(new THREE.Vector3(0,2,0)),'#ffda88');}
- expedition.work=null;trackedOutpost=null;sfx('capture');saveRun();
+ expedition.work=null;expedition.route=null;trackedOutpost=null;sfx('capture');saveRun();
 }
 function expeditionActions(){
  if(!expedition.pilot)return [];
  if(phase==='day'&&day>=2){const o=[expeditionSite('invest'),expeditionSite('engineer')].find(o=>Math.hypot(o.x-pPos.x,o.z-pPos.z)<2.4);
-  if(o)return [{id:'expedition:'+o.type,title:expedition.work?'作業中 · 指を離して待つ':'遠征先で選択',manual:true,available:!expedition.work,cost:{},effect:expedition.work?`${Math.ceil((expedition.work.kind==='salvage'?2:3)-expedition.work.t)}秒 / 離れると中断・支払済みの作業を保持`:'修復・解体・技師救出を比較',button:'選択を開く',x:o.x,z:o.z,tag:o.tag,distance:0,apply:()=>{openExpedition();return true;}}];
+  if(o){
+   const kind=o.type==='survivor'?'engineer':(['invest','salvage'].includes(expedition.route)?expedition.route:'invest');
+   const done=kind==='engineer'?expedition.engineer:expedition.facility!=='untouched';
+   return [{id:'expedition:'+o.type,title:expedition.work?'作業中 '+Math.ceil((expedition.work.kind==='salvage'?2:3)-expedition.work.t)+'秒':{invest:'製材所を修復',salvage:'製材所を解体',engineer:'技師を救出'}[kind],manual:true,available:!done&&!expedition.work,cost:expeditionCost(kind),effect:expeditionDescription(kind),button:done?'完了':expedition.work?'作業中':'作業を始める',x:o.x,z:o.z,tag:o.tag,distance:0,apply:()=>{expeditionChoice=kind;pauseWasRunning=running;return confirmExpedition();}}];
+  }
  }
  if(phase==='night'&&expedition.engineer&&expedition.usedNight!==day){
   const targets=[...defenseState].map(([k,s])=>{const [x,,z]=k.split(',').map(Number);return{k,s,x,z,d:distanceToDefense(s.type,x,z)}}).filter(v=>v.s.hp<v.s.maxHp&&v.d<2).sort((a,b)=>a.d-b.d);
@@ -6404,13 +6369,182 @@ function expeditionActions(){
  }
  return [];
 }
-function updateExpeditionCard(){
- const card=$('outpostCard');card.hidden=!running||paused||introStep<4||day<2;
- if(card.hidden)return;
- card.style.bottom=`calc(${$('actionPanel').hidden?144:Math.max(144,$('actionPanel').offsetHeight+34)}px + env(safe-area-inset-bottom))`;
- if(phase==='night'){$('outpostTitle').textContent=expedition.engineer?'技師 · '+(expedition.usedNight===day?'今夜は使用済み':'応急修理 1回'):'防衛中';$('outpostDetail').textContent=expedition.engineer?'傷んだ設備のそばで対象を選ぶ':'遠征は昼に計画';$('outpostRoute').textContent='';card.hidden=!expedition.engineer;return;}
- $('outpostTitle').textContent='任意遠征 · 今夜の準備と比較';$('outpostDetail').textContent=expedition.work?'作業を中断・再開できます':`製材所 ${expedition.facility==='invested'?'毎朝+36':expedition.facility==='salvaged'?'解体済み':'投資 / 即時回収'} · 技師 ${expedition.engineer?'救出済み':'未救出'}`;
- $('outpostRoute').textContent='タップで費用・所要時間・襲撃を比較';
+function updateExpeditionCard(){$('outpostCard').hidden=true;}
+
+
+// ---- context-actions ----
+// A press owns an immutable quote. Movement, target changes and lifecycle changes invalidate it.
+let contextChoice=null, contextChoosing=false, contextArmed=null, contextRevision=0;
+let contextLastCommit=-Infinity, contextPreview=null, contextPreviewKey='';
+function cancelContext(){
+  contextChoice=null;contextChoosing=false;contextArmed=null;contextRevision++;
+  $('contextOptions').hidden=true;$('contextPause').hidden=true;
+}
+function contextPad(){return actionFocus?.id.startsWith('equipment:')?buildPads[Number(actionFocus.id.split(':')[1])]:null;}
+function contextQuote(a=actionFocus){
+  if(!a)return '';
+  const p=a.id.startsWith('equipment:')?buildPads[Number(a.id.split(':')[1])]:null;
+  const st=defenseState.get(key(a.x,1,a.z));
+  return JSON.stringify([a.id,a.cost,a.available!==false,a.previewType,a.previewLevel,st?.type,st?.level,p?.built,p?.constructing,baseLevel,phase,day,expedition.route,expedition.usedNight,contextRevision]);
+}
+function contextCurrent(){return chooseNearbyAction(actionCandidates());}
+function executeContext(quote){
+  if(!running||paused||document.hidden||contextLost||joyId!==null||movementRequested()||Date.now()-contextLastCommit<350)return false;
+  const a=contextCurrent();if(!a||contextQuote(a)!==quote||a.available===false||!canAfford(a.cost))return false;
+  if(!a.apply())return false;
+  contextLastCommit=Date.now();cancelContext();actionTime=0;defenseActionConsumed=true;
+  haptic(20);saveRun();actionFocus=contextCurrent();updateContextUI();return true;
+}
+function bindFreshPress(button,quote,execute){
+  button.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation?.();
+    if(button.disabled||e.button>0||joyId!==null||movementRequested()||!running||paused)return;
+    contextArmed={button,id:e.pointerId,x:e.clientX,y:e.clientY,quote:quote()};
+    button.setPointerCapture?.(e.pointerId);
+  });
+  button.addEventListener('pointerup',e=>{
+    e.preventDefault();e.stopPropagation?.();const press=contextArmed;contextArmed=null;
+    if(!press||press.button!==button||press.id!==e.pointerId||Math.hypot(e.clientX-press.x,e.clientY-press.y)>9)return;
+    const r=button.getBoundingClientRect();
+    if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom||button.disabled||joyId!==null||movementRequested()||!running||paused||press.quote!==quote())return;
+    execute(press.quote);
+  });
+  button.addEventListener('pointermove',e=>{
+    if(contextArmed?.button===button&&contextArmed.id===e.pointerId&&Math.hypot(e.clientX-contextArmed.x,e.clientY-contextArmed.y)>9)contextArmed=null;
+  });
+  button.addEventListener('pointercancel',()=>{contextArmed=null;});
+  button.addEventListener('lostpointercapture',()=>{contextArmed=null;});
+  button.addEventListener('keydown',e=>{
+    if(!['Enter','Space'].includes(e.code))return;e.preventDefault();
+    if(!e.repeat&&!button.disabled&&running&&!paused&&joyId===null&&!movementRequested())contextArmed={button,id:e.code,quote:quote()};
+  });
+  button.addEventListener('keyup',e=>{
+    if(!['Enter','Space'].includes(e.code))return;e.preventDefault();const press=contextArmed;contextArmed=null;
+    if(press?.button===button&&press.id===e.code&&press.quote===quote()&&!button.disabled&&running&&!paused&&joyId===null&&!movementRequested())execute(press.quote);
+  });
+  // Pointer and keyboard activation are handled above exactly once.
+  button.addEventListener('click',e=>{e.preventDefault();e.stopPropagation?.();});
+}
+function transactEquipment(p,type){
+  equipmentDraft={index:p.index,type};pauseWasRunning=running;
+  const ok=confirmEquipment();if(!ok)equipmentDraft=null;return ok;
+}
+function beginContextChoice(mode){
+  const p=contextPad();if(!actionFocus||(phase!=='day'&&mode!=='info'))return;
+  contextChoice={id:actionFocus.id,index:p?.index,type:p?.type,mode};contextChoosing=phase==='day';contextRevision++;contextArmed=null;updateContextUI();
+}
+function chooseRoute(kind){
+  if(!running||paused||phase!=='day'||day<2||!expedition.pilot||expedition.work)return false;
+  if(kind==='engineer'?expedition.engineer:expedition.facility!=='untouched')return false;
+  cancelContext();expedition.route=kind;trackedOutpost=expeditionSite(kind).type;saveRun();updateContextUI();return true;
+}
+function optionButton(parent,label,disabled,quote,apply){
+  const b=document.createElement('button');b.type='button';b.textContent=label;b.disabled=disabled;
+  bindFreshPress(b,quote,apply);parent.appendChild(b);return b;
+}
+function renderContextOptions(a,p){
+  const box=$('contextOptions'),mode=contextChoice?.mode;
+  const st=p&&defenseState.get(key(p.x,1,p.z));
+  const sig=[a.id,mode,p?.type,st?.type,st?.level,baseLevel,equipmentUsed(),wood,coal,expedition.route].join('|');
+  const show=!!mode||(p&&!st&&introStep>=3);
+  box.hidden=!show;if(!show)return;
+  if(box._signature===sig)return;box._signature=sig;for(const child of [...box.children])child.remove();
+  if(mode==='info')return;
+  if(p){
+    for(const [type,e] of Object.entries(EQUIPMENT)){
+      if(st?.type===type)continue;
+      const q=equipmentQuote(p,type),locked=baseLevel<requiredBaseLevel(type);
+      const label=mode==='exchange'?`${e.name}へ交換 · ${costWords(q.cost)}${q.refund.wood||q.refund.coal?' / 返却 '+costWords(q.refund):''} · 失う効果: ${EQUIPMENT[st.type].role}${locked?' · 集落Lv.'+requiredBaseLevel(type)+'で解放':''}`:`${e.name}を選ぶ${locked?' · 集落Lv.'+requiredBaseLevel(type):''}`;
+      const b=optionButton(box,label,locked||(mode==='exchange'&&!canAfford(q.cost)),()=>contextQuote(contextCurrent())+JSON.stringify(equipmentQuote(p,type)),()=>{
+        if(contextCurrent()?.id!==a.id)return;
+        if(mode==='exchange'){
+          if(Date.now()-contextLastCommit<350)return;
+          if(transactEquipment(p,type)){contextLastCommit=Date.now();cancelContext();saveRun();updateDwell(0);}
+        }else{
+          contextChoice={id:a.id,index:p.index,type,mode:'type'};contextChoosing=true;contextRevision++;updateDwell(0);
+        }
+      });b.setAttribute('aria-label',label);
+      b.innerHTML=equipmentGlyph(type)+'<span>'+label+'</span>';
+      if(mode==='exchange'){
+        const preview=()=>{if(contextChoice?.mode==='exchange')contextChoice.previewType=type;};
+        b.addEventListener('pointerenter',preview);b.addEventListener('focus',preview);
+      }
+    }
+  }else if(a.id==='expedition:sawmill'&&!expedition.work&&expedition.facility==='untouched'){
+    for(const kind of ['invest','salvage'])optionButton(box,kind==='invest'?'修復を選ぶ · 翌朝から木材36':'解体を選ぶ · 木材45 / 生産を失う',false,()=>contextQuote(contextCurrent()),()=>{expedition.route=kind;contextRevision++;saveRun();updateDwell(0);});
+  }
+}
+function updateContextRoutes(){
+  const box=$('routeChoices');box.hidden=!running||paused||introStep<4||day<2||phase!=='day'||!expedition.pilot;
+  const charge=$('engineerCharge');charge.hidden=!running||paused||phase!=='night'||!expedition.engineer;
+  charge.textContent=expedition.usedNight===day?'✚ 今夜は使用済み':'✚ 応急修理 1回';charge.style.opacity=expedition.usedNight===day?'.38':'1';
+  if(box.hidden)return;
+  const sig=[day,expedition.route,expedition.facility,expedition.engineer,!!expedition.work].join('|');if(box._signature===sig)return;box._signature=sig;
+  for(const c of [...box.children])c.remove();
+  for(const kind of ['invest','salvage','engineer']){
+    const disabled=!!expedition.work||(kind==='engineer'?expedition.engineer:expedition.facility!=='untouched');
+    const names={invest:'製材所を修復',salvage:'製材所を解体',engineer:'技師を救出'};
+    const b=optionButton(box,(expedition.route===kind?'◆ ':'')+names[kind]+'へ案内',disabled,()=>[phase,day,expedition.facility,expedition.engineer,!!expedition.work].join('|'),()=>chooseRoute(kind));b.title=expeditionDescription(kind);
+  }
+}
+function updateContextUI(){
+  updateContextRoutes();
+  const a=contextCurrent();if(contextChoice&&contextChoice.id!==a?.id)cancelContext();actionFocus=a;
+  const panel=$('actionPanel');panel.hidden=!running||paused||!a;
+  $('defenseChoices').hidden=true;$('actionTrack').hidden=true;
+  if(panel.hidden){if(contextPreview)contextPreview.visible=false;return;}
+  const p=contextPad(),st=p&&defenseState.get(key(p.x,1,p.z));
+  $('actionTitle').textContent=contextChoice?.mode==='exchange'?typeName(st.type)+' Lv.'+st.level+'を交換':a.title;
+  $('actionCost').textContent=contextChoice?.mode==='info'?a.effect:!canAfford(a.cost)?'資材不足 · '+costWords(a.cost):a.id.startsWith('engineer:')?a.effect:'';
+  $('actionCost').hidden=!$('actionCost').textContent;
+  $('actionHelp').hidden=true;
+  const button=$('confirmDefense');button.hidden=contextChoice?.mode==='exchange';
+  button.textContent=(a.button||a.title)+' · '+costWords(a.cost);
+  button.disabled=a.available===false||!canAfford(a.cost)||!!p?.constructing;
+  $('contextExchange').hidden=!st||phase!=='day';
+  $('contextClose').hidden=!contextChoice;
+  $('contextPause').hidden=!contextChoosing;
+  $('contextInfo').textContent=a.id==='expedition:sawmill'?'⋯':'ⓘ';
+  renderContextOptions(a,p);updateContextPreview(a,p);
+  // Anchor the one target card beneath its world position, within the safe play area.
+  const rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(a.x,.5,a.z).project(camera);
+  const width=Math.min(292,rect.width-24),height=panel.offsetHeight||100;
+  panel.style.width=width+'px';panel.style.left=Math.max(12,Math.min(rect.width-width-12,(v.x*.5+.5)*rect.width-width/2))+'px';
+  panel.style.top=Math.max(155,Math.min(rect.height-height-110,(-v.y*.5+.5)*rect.height+42))+'px';
+  if(introStep===2&&a.id.startsWith('equipment:')){
+    const r=button.getBoundingClientRect(),hand=$('gestureGuide');hand.hidden=false;hand.setAttribute('data-tap','true');
+    hand.style.left=(r.left-rect.left+r.width*.7)+'px';hand.style.top=(r.top-rect.top+10)+'px';
+  }else $('gestureGuide').setAttribute('data-tap','false');
+}
+function updateContextPreview(a,p){
+  const type=contextChoice?.previewType||a.previewType||(a.id.startsWith('build:')?'wall':null),lv=contextChoice?.previewType?(defenseState.get(key(a.x,1,a.z))?.level||1):a.previewLevel||1;
+  if(!type){if(contextPreview)contextPreview.visible=false;return;}
+  const sig=[a.id,type,lv].join('|');
+  if(sig!==contextPreviewKey){
+    if(contextPreview){scene.remove(contextPreview);contextPreview.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});}
+    contextPreviewKey=sig;contextPreview=new THREE.Group();scene.add(contextPreview);
+    const material=new THREE.MeshBasicMaterial({color:type==='flame'?0xffc17c:0xa7e8ef,transparent:true,opacity:.23,depthWrite:false});
+    const box=(x,y,z,w,h,d)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material.clone());m.position.set(x,y,z);contextPreview.add(m);};
+    if(type==='turret'){
+      for(const x of [-.65,.65])for(const z of [-.65,.65])box(x,1.5,z,.2,2,.2);
+      box(0,2.6,0,1.9,.25,1.9);box(0,2.1,0,1.7,.17,.2);box(0,2.1,0,.18,.2,1.4);
+      const roof=new THREE.Mesh(new THREE.ConeGeometry(1.55,.85,4),material.clone());roof.rotation.y=Math.PI/4;roof.position.y=3.1;contextPreview.add(roof);
+    }else if(type==='flame'){box(0,.9,0,1.5,1.2,1.5);box(0,1.5,-.6,.5,.4,1.1);for(const x of [-.45,.45])box(x,1.85,.35,.3,1,.3);}
+    else if(type==='warehouse'){box(0,1.1,0,1.9,.22,1.5);for(const x of [-.7,.7])box(x,.7,0,.2,.7,1.1);box(.5,2,0,.17,1.7,.17);box(.5,2.5,0,.8,.25,.15);box(.5,2.5,0,.25,.8,.15);}
+    else{const f=defenseFootprint(type,a.x,a.z);box(0,1,0,f.width,1,f.depth);}
+    if(type!=='wall'){
+      const range=type==='turret'?turretRange(lv):type==='flame'?5.3+.65*lv:9;
+      const ring=makeRing(range,0xa7e8ef,.26);ring.position.y=.05;contextPreview.add(ring);
+    }
+    material.dispose();contextPreview.position.set(a.x,.6,a.z);
+  }
+  contextPreview.visible=true;
+}
+function bindContextControls(){
+  bindFreshPress($('confirmDefense'),()=>contextQuote(contextCurrent()),executeContext);
+  bindFreshPress($('contextExchange'),()=>contextQuote(contextCurrent()),()=>beginContextChoice('exchange'));
+  bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id==='expedition:sawmill'?'expedition':'info'));
+  bindFreshPress($('contextClose'),()=>contextQuote(contextCurrent()),()=>{cancelContext();updateDwell(0);});
 }
 
 
@@ -6462,6 +6596,7 @@ function frame() {
   if (running) updateWaypoint();
   updateDragonUI();
   updateManualTarget();
+  updateContextUI();
   if (!$('title').classList.contains('hidden')) renderTitleCamp(t);
   else { updateContactShadows(); renderer.render(scene, camera); }
 }
@@ -6470,7 +6605,7 @@ function boot() {
     loadCampaignProgress();
     bindSessionUI();
     $("dawnSkip").onclick = finishDawnScene;
-    $("outpostCard").onclick = () => {if(expedition.pilot){openExpedition();return;}const type=$("outpostCard").dataset.type;trackedOutpost=trackedOutpost===type?null:type;};
+    $("outpostCard").onclick = () => {if(expedition.pilot)return;const type=$("outpostCard").dataset.type;trackedOutpost=trackedOutpost===type?null:type;};
     $("victorySkip").onclick = () => {
       if (victoryScene) {
         victoryScene.t = 10;
@@ -6495,7 +6630,7 @@ function boot() {
     renderer.domElement.setAttribute("aria-label", "移動操作用ゲーム画面");
     renderer.setClearAlpha(1);
     bindInput();
-    $("confirmDefense").onclick=confirmDefenseUpgrade;
+    bindContextControls();
     $("expeditionCancel").onclick=closeExpedition;$("expeditionConfirm").onclick=confirmExpedition;
     $("equipmentCancel").onclick=closeEquipment;$("equipmentConfirm").onclick=confirmEquipment;
     $("equipmentUpgrade").onclick=()=>{const p=buildPads[equipmentDraft.index],st=defenseState.get(key(p.x,1,p.z));if(st&&st.level<3&&canAfford(getUpgradeCost(st))){upgradeDefense({x:p.x,y:1,z:p.z,state:st});closeEquipment();}};
