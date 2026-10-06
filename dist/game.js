@@ -1275,15 +1275,8 @@ function buildPlayerFeedback() {
       cargoMeshes.push({ mesh, type, index: i });
     }
   }
-  harvestTool = new THREE.Group();
-  const handle = box(0.08, 0.62, 0.08, 0x94623d);
-  harvestTool.add(handle);
-  toolBlade = box(0.32, 0.23, 0.12, 0xc1dbe4);
-  toolBlade.position.set(0.1, -0.24, 0);
-  harvestTool.add(toolBlade);
-  toolCore = box(0.13, 0.15, 0.15, 0xffb64f);
-  toolCore.position.set(0, -0.23, 0);
-  harvestTool.add(toolCore);
+  harvestTool=makeReadableAxe();harvestTool.scale.setScalar(.58);
+  toolBlade=harvestTool.getObjectByName('blade');toolCore=harvestTool.getObjectByName('grip');
   harvestTool.position.set(0, -0.5, 0.19);
   harvestTool.rotation.z = -0.25;
   limbs.armR.add(harvestTool);
@@ -1295,9 +1288,9 @@ function updatePlayerFeedback(dt) {
     equipmentLevel = baseLevel;
     toolBlade.scale.set(baseLevel >= 3 ? 1.35 : 1, baseLevel >= 2 ? 1.2 : 1, 1);
     toolBlade.material.color.set(
-      baseLevel >= 4 ? 0xffb957 : baseLevel >= 2 ? 0x85d5e7 : 0xc1dbe4,
+      baseLevel >= 2 ? 0xb0d3de : 0x8eb8c9,
     );
-    toolCore.visible = baseLevel >= 3;
+    toolCore.visible = true;
   }
   cargoBounce = Math.max(0, cargoBounce - dt);
   const inventory = { wood, coal, iron };
@@ -1633,8 +1626,6 @@ function buildSnowHorizon() {
     add(x,.7,z,1,.35,.8,0xd4e6e7);add(x,.92,z,.95,.13,.78,0xf1f7ef);
   }
   // A single purposeful wood store at the hearth's side.
-  for(let j=0;j<3;j++)for(let i=0;i<3-j;i++)add(-3.2+i*.25,.68+j*.22,.2,.22,.22,1.15,0x946c42);
-  add(-2.95,1.43,.2,1.15,.16,1.35,0x365865);add(-2.95,1.56,.2,1.2,.1,1.4,0xebf1e8);
   const masonry=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshLambertMaterial(),hearth.length);
   hearth.forEach(([x,y,z,w,h,d,c],i)=>{dummy.position.set(x,y,z);dummy.scale.set(w,h,d);dummy.rotation.set(0,0,0);dummy.updateMatrix();masonry.setMatrixAt(i,dummy.matrix);masonry.setColorAt(i,new THREE.Color(c));});
   masonry.instanceMatrix.needsUpdate=true;masonry.computeBoundingSphere();scenicWorld.add(masonry);
@@ -1663,7 +1654,7 @@ function updateBuildingOcclusion(dt){
  if(phase==='night')points.push(...enemies.filter(enemyTargetable).filter(e=>e.model.g.position.distanceTo(pPos)<playerWeapon().range).sort((a,b)=>a.model.g.position.distanceTo(pPos)-b.model.g.position.distanceTo(pPos)).slice(0,3).map(enemyAimPoint));
  const rays=points.map(p=>({ray:new THREE.Ray(camera.position.clone(),p.clone().sub(camera.position).normalize()),distance:p.distanceTo(camera.position)}));
  const obscuring=new Set(),bounds=new THREE.Box3(),hit=new THREE.Vector3();
- for(const g of [fireGroup,...settlementObjs,...turretObjs.values(),...flameObjs.values(),...warehouseObjs.values(),...wallDecorObjs.values()]){
+ for(const g of [fireGroup,...(campCore?[campCore]:[]),...settlementObjs,...turretObjs.values(),...flameObjs.values(),...warehouseObjs.values(),...wallDecorObjs.values()]){
   if(!g.visible||g.position.distanceTo(pPos)>20)continue;
   g.updateMatrixWorld(true);
   g.traverse(m=>{
@@ -1770,58 +1761,14 @@ function baseLevelName() {
           : "極寒要塞";
 }
 
+let campCore=null;
 function refreshBaseVisual() {
-  fireGroup.scale.setScalar(1 + (baseLevel-1)*.1);
+  fireGroup.position.set(-3.5,-.05,0);
+  fireGroup.scale.setScalar(1.04);
+  flamePts.position.set(-3.5,0,0);
+  if(campGlow)campGlow.position.set(-3.5,.82,0);
   updateFurnaceEvolution();
-  fireLight.distance = 14 + baseLevel * 4;
-  fireLight.intensity = 2 + baseLevel * 0.45;
-  if (baseLevel >= 2 && !fireGroup.userData.ring2) {
-    const g = new THREE.Group();
-    for (let i = 0; i < 8; i++) {
-      const b = box(0.22, 0.55, 0.22, 0x8d684b),
-        a = (i / 8) * Math.PI * 2;
-      b.position.set(Math.cos(a) * 1.45, 0.85, Math.sin(a) * 1.45);
-      g.add(b);
-    }
-    fireGroup.add(g);
-    fireGroup.userData.ring2 = g;
-  }
-  if (baseLevel >= 3 && !fireGroup.userData.tower) {
-    const g = new THREE.Group(),
-      core = box(1.2, 1, 1.2, 0x8e6848);
-    core.position.y = 0.7;
-    g.add(core);
-    const roof = box(1.5, 0.28, 1.5, 0x53677d);
-    roof.position.y = 1.35;
-    g.add(roof);
-    fireGroup.add(g);
-    fireGroup.userData.tower = g;
-  }
-  if (baseLevel >= 4 && !fireGroup.userData.beacon) {
-    const g = new THREE.Group(),
-      mast = box(0.22, 2.2, 0.22, 0xb4c6d8);
-    mast.position.y = 1.7;
-    g.add(mast);
-    const flag = box(0.75, 0.35, 0.08, 0x7ebcff);
-    flag.position.set(0.38, 2.55, 0);
-    g.add(flag);
-    fireGroup.add(g);
-    fireGroup.userData.beacon = g;
-  }
-  if (baseLevel >= 5 && !fireGroup.userData.crown) {
-    const g = new THREE.Group();
-    for (let i = 0; i < 4; i++) {
-      const p = box(0.16, 1.25, 0.16, 0xd6ecff),
-        a = (i / 4) * Math.PI * 2;
-      p.position.set(Math.cos(a), 2, Math.sin(a));
-      g.add(p);
-    }
-    const crown = box(2.35, 0.18, 2.35, 0xffd979);
-    crown.position.y = 2.72;
-    g.add(crown);
-    fireGroup.add(g);
-    fireGroup.userData.crown = g;
-  }
+  fireLight.distance=14+baseLevel*4;
 }
 
 function upgradeBase() {
@@ -1911,14 +1858,14 @@ function updateCampVisual(shownDay = day) {
   settlementObjs.forEach((g) => disposeObject(g));
   settlementObjs = [];
   if (shownDay >= 2 || baseLevel>=2) {
-    addSettlementPiece("tent", -1.9, 1.1);
-    addSettlementPiece("tent", 2, 1);
+    addSettlementPiece("tent", -3.8, 3.5);
+    addSettlementPiece("tent", 3.8, 3.5);
   }
-  if (shownDay >= 3 || baseLevel>=3) addSettlementPiece("hut", -2.3, -1.4);
-  if (shownDay >= 4 || baseLevel>=3) addSettlementPiece("hut", 2.4, -1.4);
+  if (shownDay >= 3 || baseLevel>=3) addSettlementPiece("hut", -4.6, -4.1);
+  if (shownDay >= 4 || baseLevel>=3) addSettlementPiece("hut", 4.6, -4.1);
   if (shownDay >= 5 || baseLevel>=4) {
-    addSettlementPiece("tent", -4.2, 1.8);
-    addSettlementPiece("tent", 4.2, 1.8);
+    addSettlementPiece("tent", -5.5, .8);
+    addSettlementPiece("tent", 5.5, .8);
   }
   if(baseLevel>=3)addSettlementPiece("hut",-10,-8);
   if(baseLevel>=4)addSettlementPiece("hut",10,8);
@@ -1947,6 +1894,7 @@ function clearCampExtras() {
 }
 
 function resetBaseVisual() {
+  if(campCore){disposeObject(campCore);campCore=null;}
   for (const value of Object.values(fireGroup.userData))
     if (value?.isObject3D) disposeObject(value);
   fireGroup.userData = {};
@@ -3341,12 +3289,18 @@ function spawnEnemyPack() {
   }
 }
 
+function makeReadableAxe(){
+ const g=new THREE.Group();
+ const handle=new THREE.Mesh(new THREE.BoxGeometry(.16,1.42,.16),new THREE.MeshBasicMaterial({color:0xb9824a}));handle.position.y=-.15;g.add(handle);
+ const grip=box(.22,.45,.22,0x543b2d);grip.position.y=-.66;g.add(grip);grip.name='grip';
+ const shape=new THREE.Shape();shape.moveTo(-.16,.12);shape.lineTo(.22,.66);shape.lineTo(.83,.59);shape.lineTo(.77,-.07);shape.lineTo(.35,.09);shape.lineTo(-.16,.12);
+ const blade=new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:.22,bevelEnabled:false}),new THREE.MeshBasicMaterial({color:0xb7d4df}));blade.position.z=-.11;blade.name='blade';g.add(blade);
+ const edge=box(.1,.61,.25,0xf2f7eb);edge.position.set(.79,.26,0);edge.rotation.z=-.09;g.add(edge);
+ const collar=box(.29,.31,.28,0x345563);collar.position.y=.25;g.add(collar);
+ return g;
+}
 function shootArrow(from, dir, dmg, home,kind="arrow") {
-  const m = new THREE.Mesh(
-    new THREE.BoxGeometry(0.14, 0.14, 0.95),
-    new THREE.MeshBasicMaterial({ color: 0xffd45c }),
-  );
-  if(kind==="axe"){m.geometry.dispose();m.geometry=new THREE.BoxGeometry(.1,.8,.1);const blade=box(.55,.34,.14,0xd3edeb);blade.position.set(.23,.26,0);m.add(blade);m.scale.setScalar(1.4);m.material.color.set(0xb68b56);}
+  const m=kind==='axe'?makeReadableAxe():new THREE.Mesh(new THREE.BoxGeometry(.14,.14,.95),new THREE.MeshBasicMaterial({color:0xffd45c}));
   m.position.copy(from);
   m.lookAt(from.clone().add(dir));
   scene.add(m);
@@ -3483,7 +3437,7 @@ function updateProjectiles(dt, t) {
     }
     a.v.y -= (a.home ? 0 : 4) * dt;
     a.m.position.add(a.v.clone().multiplyScalar(dt));
-    if(a.kind==='axe')a.m.rotation.z+=dt*20;else a.m.lookAt(a.m.position.clone().add(a.v));
+    if(a.kind==='axe'){a.spin=(a.spin||0)+dt*14;a.m.quaternion.copy(camera.quaternion);a.m.rotateZ(a.spin);}else a.m.lookAt(a.m.position.clone().add(a.v));
     let dead = a.life <= 0 || a.m.position.y < 0;
     if (!dead)
       for (const e of enemies)
@@ -3494,7 +3448,7 @@ function updateProjectiles(dt, t) {
             .distanceTo(enemyAimPoint(e)) < (e.kind === "boss" ? 1.25 : 0.8)
         ) {
           damageEnemy(e, a.dmg);
-          if(a.kind==='axe'){spawnVoxelBreakup(a.m.position.x,a.m.position.y,a.m.position.z,0xffc782,7);sfx("wood");if(settings.motion)shake=Math.max(shake,.35);}
+          if(a.kind==='axe'){spawnVoxelBreakup(a.m.position.x,a.m.position.y,a.m.position.z,0xb7d5df,3);sfx("wood");if(settings.motion)shake=Math.max(shake,.35);}
           burst(a.m.position.x, a.m.position.y, a.m.position.z, 0xffe08a, 3);
           dead = true;
           break;
@@ -4723,7 +4677,7 @@ function updateManualTarget(){
     manualTargetOutline.renderOrder=30;scene.add(manualTargetOutline);
   }
   if(!manualTargetOutline)return;manualTargetOutline.visible=!!visible;
-  if(visible){const f=defenseFootprint(a.id.startsWith('equipment:')?'turret':'wall',a.x,a.z);manualTargetOutline.position.set(a.x,.61,a.z);manualTargetOutline.scale.set(f.width+.3,.1,f.depth+.3);}
+  if(visible){const point=actionVisualPoint(a),f=a.id==='fuel'?{width:2.2,depth:2.2}:['base','repair'].includes(a.id)?{width:2.8,depth:2.4}:defenseFootprint(a.id.startsWith('equipment:')?'turret':'wall',a.x,a.z);manualTargetOutline.position.set(point.x,.61,point.z);manualTargetOutline.scale.set(f.width+.3,.1,f.depth+.3);}
 }
 function updateManualControls(candidates,candidate){
   const choices=$("defenseChoices"),button=$("confirmDefense"),manual=candidates.filter(a=>a.manual);
@@ -4772,7 +4726,7 @@ function updateJourney(dt) {
       : "床のそばで指を離し、建築ボタンをタップ";
     objectiveTarget = { x: -6.3, z: 8 };
   } else if (introStep === 3) {
-    title = "3 / 3　炉のそばへ戻ろう";
+    title = "3 / 3　拠点の前へ戻ろう";
     sub = "矢塔と一緒に最初の群れを迎えよう";
     objectiveTarget = { x: 0, z: 3 };
   } else if (phase === "day") {
@@ -4873,7 +4827,7 @@ function preparationAdvice() {
           if(nextRaid.kind==='boss'){
         if(baseLevel<3){
           const c=baseUpgradeCost(),missing=wood<c.wood?'wood':coal<c.coal+30?'coal':null;
-          return {title:'竜に備えて炉の耐久を増やそう',sub:`木材${c.wood}・石炭${c.coal} / 集落Lv.${baseLevel+1}`,target:missing?nearbyResource(missing):{x:1.8,z:0}};
+          return {title:'竜に備えて拠点の耐久を増やそう',sub:`木材${c.wood}・石炭${c.coal} / 集落Lv.${baseLevel+1}`,target:missing?nearbyResource(missing):{x:1.8,z:0}};
         }
         if(coal<50)return {title:'竜との戦いに石炭を確保しよう',sub:`石炭 ${coal|0} / 50 ・ 戦闘中も炉へ補給`,target:nearbyResource('coal')};
         return {title:'竜の印を炉から離して誘導しよう',sub:'光る円の外へ / 燃料が減ったら炉へ補給',target:{x:5.5,z:0}};
@@ -4928,7 +4882,7 @@ function updateWaypoint() {
   const off=sx<32 || sx>rect.width-32 || sy<145 || sy>rect.height-150;
   const angle=Math.atan2(sy-rect.height/2,sx-rect.width/2);
   const arrows=['→','↘','↓','↙','←','↖','↑','↗'];
-  const label=introStep<2?'木を集める':introStep===2?'建てる':introStep===3?'炉へ':phase==='night'?'補給':'準備';
+  const label=introStep<2?'木を集める':introStep===2?'建てる':introStep===3?'拠点へ':phase==='night'?'補給':'準備';
   el.textContent=(off?arrows[(Math.round(angle/(Math.PI/4))+8)%8]:'↓')+' '+label;
   el.setAttribute('data-offscreen',String(off));
 }
@@ -6382,7 +6336,7 @@ function updateEdgeCues(){
    el.style.setProperty('--approach',String(Math.max(.15,Math.min(1,1-g.distance/30))));
    el.setAttribute('aria-label',(g.forecast?'次の襲撃 ':'接近中 ')+(g.kind==='boss'?'霜翼竜':g.kind==='wolf'?'狼':g.kind==='breaker'?'破城兵':g.kind==='furnace'?'炉':'襲撃隊')+(g.n>1?' '+g.n+'体':''));
  }
- place('furnaceDirection',{x:0,z:0,kind:'furnace',distance:30,n:0});
+ place('furnaceDirection',{x:fireGroup.position.x,z:fireGroup.position.z,kind:'furnace',distance:30,n:0});
  const groups=threatGroups();
  if(!groups.length&&nextRaid)groups.push({x:Math.cos(nextRaid.angle)*30,z:Math.sin(nextRaid.angle)*30,kind:nextRaid.kind==='boss'?'boss':nextRaid.kind==='wolf'?'wolf':nextRaid.kind==='armored'?'armored':nextRaid.kind==='siege'?'breaker':'raider',n:0,distance:30,forecast:true});
  groups.forEach((g,i)=>place(ids[i],g));
@@ -6596,6 +6550,7 @@ function updateContextRoutes(){
     const b=optionButton(menu,label,false,()=>[phase,day,expedition.facility,expedition.engineer,!!expedition.work].join('|'),()=>chooseRoute(kind));b.title=expeditionDescription(kind);
   }
 }
+function actionVisualPoint(a){return a.id==='fuel'?fireGroup.position:['base','repair'].includes(a.id)&&campCore?campCore.position:a;}
 function updateContextUI(){
   updateContextRoutes();updateQuietInspect();
   const a=contextCurrent();if(contextChoice&&contextChoice.id!==a?.id)cancelContext();actionFocus=a;
@@ -6617,7 +6572,7 @@ function updateContextUI(){
   $('contextInfo').setAttribute('aria-label',p&&!st?'施設の種類を選ぶ':'設備の詳細');
   renderContextOptions(a,p);updateContextPreview(a,p);
   // Anchor the one target card beneath its world position, within the safe play area.
-  const rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(a.x,.5,a.z).project(camera);
+  const anchor=actionVisualPoint(a),rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(anchor.x,.5,anchor.z).project(camera);
   const width=Math.min(292,rect.width-24),height=panel.offsetHeight||100;
   panel.style.width=width+'px';panel.style.left=Math.max(12,Math.min(rect.width-width-12,(v.x*.5+.5)*rect.width-width/2))+'px';
   panel.style.top=Math.max(155,Math.min(rect.height-height-110,(-v.y*.5+.5)*rect.height+42))+'px';
@@ -6675,25 +6630,24 @@ function bindScreenAction(button,commit,ready=()=>true){
 }
 
 function updateFurnaceEvolution(){
-  if(fireGroup.userData.evolutionLevel===baseLevel)return;
-  if(fireGroup.userData.evolution)disposeObject(fireGroup.userData.evolution);
-  const g=new THREE.Group();fireGroup.add(g);fireGroup.userData.evolution=g;fireGroup.userData.evolutionLevel=baseLevel;
-  const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);};
-  if(baseLevel>=2){
-    for(const x of [-1.15,1.15]){add(.4,1.65,.6,0x526f78,x,.95,-.45);add(.6,.22,.8,0xd9e6df,x,1.83,-.45);add(.18,.46,.08,0xffce72,x,1.14,.0);}
-    add(2.65,.28,1.1,0x45616c,0,.32,-.65);add(1.8,.95,.6,0x41616d,0,.95,-.85);
-  }
-  if(baseLevel>=3){
-    add(1.75,1.5,.95,0x3e6372,0,1.6,-.85);add(2.15,.25,1.25,0xc6dcdf,0,2.48,-.85);
-    add(.55,1.65,.55,0x344f5b,-.65,3.08,-.85);add(.8,.2,.8,0xe3ede5,-.65,3.96,-.85);
-    for(const x of [-.48,.48])add(.34,.58,.08,0xffbb60,x,1.8,-.31);
-  }
-  if(baseLevel>=4){
-    for(const x of [-1.5,1.5]){add(.4,2.8,.5,0x7695a0,x,1.65,-.4);add(.65,.2,.75,0xe4eeea,x,3.13,-.4);add(.65,.44,.15,0xffd083,x,2.7,-.08);}
-    add(3.45,.32,1.5,0x355464,0,3.1,-.8);add(3.55,.15,1.65,0xe1ece7,0,3.34,-.8);
-    add(.25,2.2,.25,0xadbdbe,.85,3.65,-.95);add(.8,.55,.1,0xf0b960,1.18,4.15,-.92);
-  }
+ if(campCore?.userData.level===baseLevel)return;
+ if(campCore)disposeObject(campCore);
+ const g=new THREE.Group();campCore=g;g.userData.level=baseLevel;g.position.set(1.1,0,-1.2);scene.add(g);
+ const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);return m;};
+ // A low, broad blue hall with a shield; the orange open hearth stands separately to its west.
+ add(2.6,.28,2.2,0x66838d,0,.65,0);
+ add(2.3,1.35,1.8,0x658692,0,1.43,0);
+ add(.65,1.15,.12,0x244552,.45,1.37,.94);
+ for(const x of [-.83,.88])add(.38,.42,.12,0xf5dca3,x,1.6,.94);
+ for(const side of [-1,1]){const roof=add(1.58,.22,2.35,0x244d68,side*.68,2.35,0);roof.rotation.z=side*-.32;const snow=add(1.58,.09,2.4,0xdbe9ed,side*.68,2.5,0);snow.rotation.z=side*-.32;}
+ const shield=new THREE.Shape();shield.moveTo(-.3,.3);shield.lineTo(.3,.3);shield.lineTo(.27,-.1);shield.lineTo(0,-.35);shield.lineTo(-.27,-.1);shield.closePath();
+ const crest=new THREE.Mesh(new THREE.ExtrudeGeometry(shield,{depth:.08,bevelEnabled:false}),new THREE.MeshLambertMaterial({color:0xe7bc6f}));crest.position.set(-.3,1.58,1.02);g.add(crest);
+ if(baseLevel>=2)for(const x of [-1.1,1.1])add(.22,1.7,.25,0x35586a,x,1.6,.85);
+ if(baseLevel>=3){add(.9,.55,.85,0x416c80,-.55,2.8,-.35);add(1.15,.16,1.05,0xc9e0e5,-.55,3.12,-.35);}
+ if(baseLevel>=4){add(.12,1.55,.12,0x94aeb5,.8,3.13,-.55);add(.65,.42,.1,0xe7bd6a,1.07,3.66,-.55);}
+ if(baseLevel>=5)for(const x of [-1.28,1.28]){add(.45,2.7,.55,0x486c7c,x,1.8,-.65);add(.6,.15,.7,0xe1eced,x,3.24,-.65);}
 }
+
 function evolveDefenseModel(g,type,level){
   g.scale.multiplyScalar(type==='wall'?1:1.08);
   addUpperDefenseShape(g,type,level);
