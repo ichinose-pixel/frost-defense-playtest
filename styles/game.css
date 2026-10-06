@@ -1381,3 +1381,49 @@ button:disabled{filter:saturate(.35);opacity:.58}
 @media(max-height:650px){#title h1{top:45px;font-size:39px}#title h2{top:124px}#title .eyebrow{top:22px}#title{padding:18px 22px}#title .controlNote{display:none}#pausePanel{padding:18px;gap:6px}#pausePanel .campRules{font-size:10px}#pausePanel .settingsGrid{padding:10px}}
 
 #title .btn,#pausePanel .btn{border-radius:5px;background:linear-gradient(#e4c489,#c9a567);color:#183741;box-shadow:0 4px 0 #80633b;border:1px solid #f0d7a6}
+
+/* こごえるな！: the playable world is the title scene, not a wallpaper. */
+#gameViewport[data-screen='title']>:not(#title):not(canvas):not(#runtimeStatus){visibility:hidden!important}
+#title{padding:0 24px max(23px,env(safe-area-inset-bottom));justify-content:flex-end;align-items:center;overflow:hidden;background:linear-gradient(180deg,#09273565,transparent 27%,transparent 57%,#0a293ed9 78%,#092536 100%)}
+#title .titleIdentity{position:absolute;top:max(26px,env(safe-area-inset-top));left:0;width:100%;pointer-events:none;transform:rotate(-5deg)}
+#title .titleTagline{font-size:11px;letter-spacing:.12em;margin:0 0 9px;color:#d7eaf1;font-weight:700}
+#title h1,#title:has(#campAlbum:not([hidden])) h1{position:static;inset:auto;width:auto;margin:0;font:1000 69px/.96 'Hiragino Kaku Gothic ProN','Yu Gothic',Meiryo,sans-serif;letter-spacing:-.1em;text-shadow:0 4px 0 #264858,3px 0 #264858,-3px 0 #264858,0 -2px #264858,0 8px 0 #0b2639;color:#f3f4e7}
+#title h1 span{display:block;font:inherit;letter-spacing:inherit;padding:0;color:inherit}
+#title h1 i{display:inline-block;font-style:normal}
+#title h1 .logoCold i:nth-child(1){transform:rotate(-8deg) translateY(1px)}
+#title h1 .logoCold i:nth-child(2){transform:rotate(6deg) translateY(-4px)}
+#title h1 .logoCold i:nth-child(3){transform:rotate(-4deg)}
+#title h1 .logoWarm{padding-left:48px;margin-top:5px}
+#title h1 .logoWarm i:nth-child(1){transform:rotate(5deg)}
+#title h1 .logoWarm i:nth-child(2){transform:rotate(-7deg) translateY(3px)}
+#title h1 .logoWarm i:last-child{color:#ffb352;transform:rotate(9deg);text-shadow:0 4px 0 #8a451f,2px 0 #8a451f,-2px 0 #8a451f,0 7px #192e36}
+#titleSceneCaption{position:absolute;top:58%;left:0;right:0;margin:0!important;font-size:12px!important;font-weight:700;letter-spacing:.08em;color:#fff0d4!important;text-shadow:0 2px 5px #091c25,0 0 10px #091c25}
+.titleActions{width:min(320px,100%);display:flex;flex-direction:column;align-items:stretch;position:relative}
+#title .btn{width:100%;min-height:56px;margin:5px 0;padding:13px 20px;border-radius:12px 8px 14px 7px;border:2px solid #e69c63;background:#b85b30;color:#fff8e8;font-size:20px;font-weight:850;letter-spacing:.06em;box-shadow:0 5px 0 #6b3826,0 8px 14px #09253466;transform:rotate(-1deg)}
+#title .btn:active{transform:translateY(3px) rotate(-1deg);box-shadow:0 2px 0 #6b3826}
+#title[data-saved='true'] #startBtn{background:transparent;border:0;color:#c1d5d9;box-shadow:none;min-height:40px;font-size:13px;margin:6px 0 0;transform:none}
+#title #resumeDetail{font-size:12px;margin:0 0 7px;color:#e7e9da;line-height:1.4}
+#title #campaignNote{display:block;font-size:10px;line-height:1.4;min-height:14px;color:#91acb8;margin:12px 0 0}
+#titleChapters{margin:8px 0 0;font-size:12px;color:#b7d1d8;touch-action:pan-y}
+#titleChapters summary{list-style:none;cursor:pointer;padding:9px;min-height:36px}
+#titleChapters summary:after{content:' ＋';color:#f1c788}#titleChapters[open] summary:after{content:' −'}
+#titleChapters[open]{position:absolute;bottom:0;left:-10px;right:-10px;background:#123848f5;border:1px solid #6b949e;border-radius:14px;padding:8px 15px;box-shadow:0 10px 35px #071f2ce0;z-index:3;max-height:46vh;overflow-y:auto}
+#title #stageSelect{display:flex;flex-direction:column;gap:5px;margin:5px 0}
+#title .stageChoice{min-height:42px;font-size:13px;text-align:left;border-radius:6px;background:#224655;color:#e1edef}
+#title .stageChoice.selected{background:#477381;color:white;border-color:#a4ccd4}
+#title #stageDescription{font-size:11px;margin:8px 0}#title #campaignRecord{font-size:11px!important}
+#title #campAlbum{display:none}#title #journeyStart{width:100%;margin:8px 0 0;border:1px solid #6e9299;background:#224753;border-radius:7px;color:#f0d6a2;min-height:42px;padding:9px}
+#newRunConfirm{position:absolute;inset:auto -10px 0;z-index:4;background:#163c4c;border:1px solid #85aeb5;border-radius:14px;padding:19px;box-shadow:0 10px 40px #061e2be0}
+#newRunConfirm p{font-size:14px;margin-bottom:15px}#newRunConfirm button{width:100%;min-height:46px;border-radius:8px;border:1px solid #a1b9b8;background:#b85b30;color:white;font-size:14px;margin:5px 0}#newRunCancel{background:#294d5b!important}
+#title button:focus-visible,#title summary:focus-visible{outline:3px solid #f5df9c;outline-offset:3px}
+@media(max-height:650px){#title{padding:0 22px max(16px,env(safe-area-inset-bottom))}#title .titleIdentity{top:max(20px,env(safe-area-inset-top))}#title h1,#title:has(#campAlbum:not([hidden])) h1{font-size:53px}#title .titleTagline{font-size:10px;margin-bottom:6px}#titleSceneCaption{top:53%;font-size:11px!important}#title .btn{min-height:49px;font-size:18px;padding:10px}#title #campaignNote{margin-top:8px}#titleChapters{margin-top:3px}#title[data-saved='true'] #titleSceneCaption{display:none}}
+@media(min-aspect-ratio:6/5){#title{align-items:flex-end;padding-right:max(30px,env(safe-area-inset-right))}#title .titleIdentity{width:44%;left:auto;right:24px;top:20px}#title h1,#title:has(#campAlbum:not([hidden])) h1{font-size:44px}#title .titleActions{width:42%;max-width:320px}#titleSceneCaption{left:3%;right:auto;top:auto;bottom:22px}#titleChapters[open]{max-height:80vh}#title .titleTagline{font-size:9px}}
+#title #titleSceneCaption{top:auto;bottom:145px}#title[data-saved='true'] #titleSceneCaption{display:none}
+@media(max-height:650px){#title #titleSceneCaption{bottom:125px}}
+
+/* Keep the approved name together as one readable word on narrow phones. */
+#title .titleIdentity{transform:rotate(-3deg)}
+#title h1,#title:has(#campAlbum:not([hidden])) h1{font-size:clamp(42px,12.8vw,54px);line-height:1.15;letter-spacing:-.075em;white-space:nowrap}
+#title h1 span{display:inline;font:inherit;letter-spacing:inherit}
+#title h1 .logoWarm{padding:0;margin:0}
+@media(min-aspect-ratio:6/5){#title h1,#title:has(#campAlbum:not([hidden])) h1{font-size:clamp(30px,5.8vw,48px)}}
