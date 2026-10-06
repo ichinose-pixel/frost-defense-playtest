@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>フロスト・ディフェンス — 灯の集落</title>
-    <link rel="stylesheet" href="styles/game.css?v=43" />
+    <link rel="stylesheet" href="styles/game.css?v=44" />
   </head>
   <body>
     <div id="gameViewport">
@@ -41,7 +41,7 @@
         <div id="defenseChoices" hidden aria-label="強化する対象"></div>
         <button id="confirmDefense" hidden type="button">強化する</button>
       </section>
-      <nav id="routeChoices" hidden aria-label="遠征先へ案内"></nav><small id="engineerCharge" hidden></small>
+      <button id="siteInspect" type="button" hidden aria-label="近くの施設の条件を見る">⌕ 条件</button><nav id="routeChoices" hidden aria-label="遠征先へ案内"></nav><small id="engineerCharge" hidden></small>
       <button id="outpostCard" hidden><b id="outpostTitle"></b><span id="outpostDetail"></span><small id="outpostRoute"></small></button>
       <section id="dawnPanel" hidden><small id="dawnNight"></small><h2 id="dawnTitle"></h2><p id="dawnDetail"></p><button id="dawnSkip">強化を選ぶ ›</button></section>
       <div id="victoryMoment" hidden></div>
@@ -66,12 +66,12 @@
           <small>気温</small><b><span id="temp">-10</span><em>℃</em></b>
         </div>
         <div class="chip status" id="fuelChip">
-          <small>燃料</small><b><i class="pict fire" aria-hidden="true"></i> <span id="fire">100</span><em>%</em></b
+          <small>炉・燃料</small><b><i class="pict fire" aria-hidden="true"></i> <span id="fire">100</span><em>%</em></b
           ><i class="meter"><i id="fuelMeter"></i></i>
         </div>
         <div class="chip status" id="baseChip">
-          <small>集落 Lv.<span id="baseLv">1</span></small
-          ><b><i class="pict home" aria-hidden="true"></i> <span id="base">100</span><em>%</em></b
+          <small>拠点 Lv.<span id="baseLv">1</span></small
+          ><b><i class="pict home" aria-hidden="true"></i> <span id="base">300</span><em id="baseCap">/300 HP</em></b
           ><i class="meter"><i id="baseMeter"></i></i>
         </div>
         <div id="bossPanel" hidden>
@@ -129,7 +129,7 @@
       <div id="pausePanel" class="overlay hidden">
         <div class="eyebrow">ひと休み</div>
         <h1>灯は、ここで待っています</h1>
-        <p id="pauseCaption"></p>
+        <p id="pauseCaption"></p><p class="campRules">拠点HP0で敗北。木材30＋石炭5で修理。<br>炉は石炭10で40%回復・昼も回復。消火中は防衛射撃が25%遅くなる。<br>拠点Lvで武器と外周が成長。施設は拠点Lv＋1、最大Lv5。</p>
         <button id="resumeBtn" class="btn">つづける</button>
         <div class="settingsGrid">
           <label
@@ -172,6 +172,6 @@
       </div>
     </div>
     <script src="vendor/three-0.160.0.min.js"></script>
-    <script src="dist/game.js?v=43"></script>
+    <script src="dist/game.js?v=44"></script>
   </body>
 </html>

@@ -1327,3 +1327,12 @@ body{font-family:system-ui,-apple-system,"Yu Gothic",sans-serif;color:var(--ice)
 #routeChoices .routeMenu button{font-size:13px;min-height:48px;padding:7px}
 #routeChoices[data-open="true"]{z-index:35}
 #gameViewport:has(#routeChoices[data-open="true"]) #actionPanel{visibility:hidden}
+
+#siteInspect{position:absolute;left:12px;bottom:16px;z-index:26;min-height:42px;padding:7px 12px;background:#274551cc;color:#c4d4d5;border:1px solid #748f96;border-radius:12px;font-size:13px}#siteInspect[hidden]{display:none}#baseChip b{font-size:18px!important}#baseChip em{font-size:10px!important}
+
+.campRules{font-size:13px;line-height:1.65;color:#c6d8dd}
+
+#gameViewport[data-phase="night"] #hud{display:grid;grid-template-columns:.9fr 1.45fr .85fr;gap:4px}
+#gameViewport[data-phase="night"] #hud .chip{grid-column:auto;min-width:0!important;width:auto;margin:0;padding:6px}
+#gameViewport[data-phase="night"] #hud .chip b{font-size:18px;line-height:1.15}
+#baseCap{display:block;font-size:10px!important;line-height:1.1}
