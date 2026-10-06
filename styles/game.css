@@ -1294,3 +1294,36 @@ body{font-family:system-ui,-apple-system,"Yu Gothic",sans-serif;color:var(--ice)
 @keyframes contextTap{0%,20%{transform:translate(-28px,12px) rotate(-20deg);opacity:.7}42%,58%{transform:translate(0,-12px) rotate(-20deg);opacity:.35}70%,80%{transform:translate(0,0) rotate(-20deg);opacity:1}100%{transform:translate(0,-8px) rotate(-20deg);opacity:.3}}
 #gameViewport[data-motion="false"] #gestureGuide[data-tap="true"] i{animation:none}
 @media(prefers-reduced-motion:reduce){#gestureGuide[data-tap="true"] i{animation:none}}
+/* v42: readable silhouettes and deliberate screen transitions at phone widths. */
+#actionPanel{padding:10px!important;width:calc(100% - 24px);max-width:332px}
+#actionPanel #actionTitle{font-size:17px;line-height:1.25}
+#actionPanel #confirmDefense{font-size:17px;min-height:52px}
+#actionPanel #actionCost{font-size:14px;line-height:1.4}
+.contextHead button{min-width:38px;min-height:42px}
+#contextOptions button{min-height:48px}#contextOptions button span{font-size:13px;line-height:1.3}
+#contextOptions .choiceArt{width:34px;height:36px;flex-basis:34px}
+#routeChoices button{font-size:12px;min-height:44px}
+#gameViewport[data-phase="day"][data-iron="true"] #hud .iron-chip{display:block}
+#gameViewport[data-iron="true"] #hud .chip{min-width:0;padding:6px 7px}
+#gameViewport[data-iron="true"] #hud .chip b{font-size:19px}
+#gameViewport[data-iron="true"] #hud .chip small{font-size:11px}
+#gameViewport[data-phase="day"][data-iron="true"] #hud{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+#gameViewport[data-phase="day"][data-iron="true"] #hud .chip{grid-column:auto;margin:0}
+#gameViewport[data-phase="day"][data-iron="true"] #hud .resource{display:block}
+#gameViewport[data-phase="day"][data-iron="true"] #hud .status:nth-child(4){min-width:0;padding:6px 4px}
+#gameViewport[data-phase="day"][data-iron="true"] #hud .status:nth-child(4) b{font-size:14px}
+.worldPop{font-size:20px!important;font-weight:800;text-shadow:0 2px 3px #183340,1px 0 2px #183340,-1px 0 2px #183340}
+#upgrade .upCard{min-height:92px;padding:12px 16px}
+#upgradeCards{gap:10px}#upgrade .upCard b{font-size:21px}#upgrade .upCard span{font-size:16px}
+@media(max-height:650px){#upgrade .upCard{min-height:80px;padding:8px 14px}#upgrade .upCard .rewardIcon{width:28px;height:28px}#upgrade .upCard b{font-size:18px}#upgrade .upCard span{font-size:14px}}
+
+/* v43: the site conveys the building; the map stays folded until requested. */
+.groundHud.siteCost{padding:3px 6px;gap:4px;align-items:center;background:#173542d9;border:1px solid #d5e9df66;border-radius:8px;font-size:18px;line-height:24px;white-space:nowrap;box-shadow:none;transform:translate(-50%,-50%);pointer-events:none}
+.siteCost .pict{width:20px;height:20px}.siteCost b{font-size:18px;color:#fff0bf}
+#routeChoices{left:auto;right:12px;width:auto;bottom:14px;display:block}
+#routeChoices .routeToggle{display:flex;align-items:center;gap:5px;min-height:46px;padding:7px 10px;font-size:13px;max-width:118px;background:#173645ed}
+.routeToggle svg{width:27px;height:27px;fill:none;stroke:#ffce8c;stroke-width:2;flex-shrink:0}
+#routeChoices .routeMenu{position:absolute;bottom:56px;right:0;display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px;width:250px;border-radius:14px;background:#143240f5;border:1px solid #86afb7}
+#routeChoices .routeMenu button{font-size:13px;min-height:48px;padding:7px}
+#routeChoices[data-open="true"]{z-index:35}
+#gameViewport:has(#routeChoices[data-open="true"]) #actionPanel{visibility:hidden}

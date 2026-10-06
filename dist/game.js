@@ -50,7 +50,7 @@ let yaw = 0,
   turretDmg = 10,
   fireDrainMul = 1,
   resourceRespawnT = 8;
-const CAM_OFFSET = new THREE.Vector3(14.5, 17.2, 15.0);
+const CAM_OFFSET = new THREE.Vector3(11.6, 13.76, 12.0);
 let camLook = new THREE.Vector3();
 let buildPads = [],
   workerObjs = [],
@@ -1254,7 +1254,7 @@ function buildPlayerFeedback() {
     [0.08, 0.66, 0.05, 0xd2ae73, 0.22, 1.04, -0.44],
   ]);
   for (const [column, type] of ["wood", "coal", "iron"].entries()) {
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 8; i++) {
       const mesh = box(
         type === "wood" ? 0.3 : 0.18,
         0.14,
@@ -1296,8 +1296,8 @@ function updatePlayerFeedback(dt) {
   for (const c of cargoMeshes) {
     // Each visible piece represents a band of stock, not a capacity or another inventory.
     c.mesh.visible =
-      c.index < Math.min(4, Math.ceil(Math.max(0, inventory[c.type]) / 25));
-    c.mesh.scale.setScalar(1 + Math.sin((cargoBounce / 0.3) * Math.PI) * 0.12);
+      c.index < Math.min(8, Math.ceil(Math.max(0, inventory[c.type]) / 15));
+    c.mesh.scale.setScalar(1.3 + Math.sin((cargoBounce / 0.3) * Math.PI) * 0.12);
   }
   harvestSwing = Math.max(0, harvestSwing - dt);
   harvestTool.visible = phase === "day" || harvestSwing > 0;
@@ -1668,7 +1668,8 @@ function updatePresentation(dt) {
     if(q>=1){disposeObject(a.ring);impactRings.splice(i,1);}
   }
   updateWallConnections();
-  for(const p of buildPads)p.g.visible=!p.built&&!p.constructing&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<11&&(introStep>=4||(introStep===2&&p.x===-8&&p.z===8));
+  const visiblePads=buildPads.filter(p=>!p.built&&!p.constructing&&(introStep>=4||(introStep===2&&p.x===-8&&p.z===8))).sort((a,b)=>distanceToDefense(a.type,a.x,a.z)-distanceToDefense(b.type,b.x,b.z)).slice(0,3);
+  for(const p of buildPads)p.g.visible=visiblePads.includes(p)&&!(contextChoice?.index===p.index&&contextChoice.type!==p.type)&&phase==='day'&&!p.built&&!p.constructing&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<9&&(introStep>=4||(introStep===2&&p.x===-8&&p.z===8));
   for(const [k,g] of wallDecorObjs){
     if(!g.userData.gates)continue;
     const [x,,z]=k.split(',').map(Number);
@@ -1697,8 +1698,8 @@ function updateIntroGuide(){
   }
   const close=objectiveTarget&&Math.hypot(pPos.x-objectiveTarget.x,pPos.z-objectiveTarget.z)<1.4;
   const assembling=constructionSites.some(s=>s.p.type==='turret');
-  const titles=['木に近づこう',assembling?'組み立て中':close?'建築ボタンをタップ':'光る床へ','炉へ戻ろう'];
-  const notes=['指を滑らせて移動',close?'指を離す → タップ・木材40':'床のそばへ移動','最初の夜を迎えよう'];
+  const titles=['木に近づこう',assembling?'組み立て中':close?'建築ボタンをタップ':'矢塔の形へ','炉へ戻ろう'];
+  const notes=['指を滑らせて移動',close?'指を離す → タップ・木材40':'矢塔のそばへ移動','最初の夜を迎えよう'];
   $('introNumber').textContent=`${step+1} / 3`;
   $('introTitle').textContent=gameElapsed<guideCelebrateUntil?(step===1?'採集できた！':'矢塔が完成！'):titles[step];
   $('introHelp').textContent=notes[step];
@@ -1740,7 +1741,8 @@ function baseLevelName() {
 }
 
 function refreshBaseVisual() {
-  fireGroup.scale.setScalar(1 + baseLevel * 0.12);
+  fireGroup.scale.setScalar(1 + (baseLevel-1)*.1);
+  updateFurnaceEvolution();
   fireLight.distance = 14 + baseLevel * 4;
   fireLight.intensity = 2 + baseLevel * 0.45;
   if (baseLevel >= 2 && !fireGroup.userData.ring2) {
@@ -1868,6 +1870,7 @@ function addSettlementPiece(kind, x, z) {
       [0.26, 0.52, 0.26, 0x705446, 0.62, 1.96, -0.38],
     ]);
   }
+  g.scale.setScalar(baseLevel>=4?1.28:1.12);
   g.position.set(x, 0, z);
   scene.add(g);
   settlementObjs.push(g);
@@ -1876,18 +1879,17 @@ function addSettlementPiece(kind, x, z) {
 function updateCampVisual(shownDay = day) {
   settlementObjs.forEach((g) => disposeObject(g));
   settlementObjs = [];
-  if (shownDay >= 2) {
+  if (shownDay >= 2 || baseLevel>=2) {
     addSettlementPiece("tent", -1.9, 1.1);
     addSettlementPiece("tent", 2, 1);
   }
-  if (shownDay >= 3) addSettlementPiece("hut", -2.3, -1.4);
-  if (shownDay >= 4) addSettlementPiece("hut", 2.4, -1.4);
-  if (shownDay >= 5) {
+  if (shownDay >= 3 || baseLevel>=3) addSettlementPiece("hut", -2.3, -1.4);
+  if (shownDay >= 4 || baseLevel>=3) addSettlementPiece("hut", 2.4, -1.4);
+  if (shownDay >= 5 || baseLevel>=4) {
     addSettlementPiece("tent", -4.2, 1.8);
     addSettlementPiece("tent", 4.2, 1.8);
   }
-  fireGroup.scale.setScalar(1 + Math.min(shownDay - 1, 5) * 0.08);
-  fireLight.distance = 14 + Math.min(shownDay, 6) * 2;
+  refreshBaseVisual();
 }
 
 function clearCampExtras() {
@@ -2068,7 +2070,7 @@ function initOutposts() {
 }
 
 function refreshOutpostTag(o) {
-  if(expedition.pilot){const facility=o.type==='sawmill';setGroundTag(o.tag,facility?'古い製材所':'技師の避難所',facility?(expedition.facility==='invested'?'毎朝 木材36':expedition.facility==='salvaged'?'解体済み':'修復 / 解体を選ぶ'):(expedition.engineer?'救出済み':'木材35で救出'),'#ffd38a');return;}
+  if(expedition.pilot&&o.type!=='ironmine'){const facility=o.type==='sawmill';setGroundTag(o.tag,facility?'古い製材所':'技師の避難所',facility?(expedition.facility==='invested'?'毎朝 木材36':expedition.facility==='salvaged'?'解体済み':'修復 / 解体を選ぶ'):(expedition.engineer?'救出済み':'木材35で救出'),'#ffd38a');return;}
   const i = outpostInfo(o.type);
   if (o.captured)
     setGroundTag(
@@ -2089,13 +2091,13 @@ function refreshOutpostTag(o) {
 }
 
 function updateOutposts(dt) {
-  if(expedition.pilot)return;
   for (const o of outposts) {
+    if(expedition.pilot&&o.type!=="ironmine")continue;
     refreshOutpostTag(o);
     if (phase !== "day" && campPlan !== "supply") continue;
     const d = Math.hypot(o.x - pPos.x, o.z - pPos.z);
     if (
-      phase === "day" && !o.captured &&
+      !expedition.pilot && phase === "day" && !o.captured &&
       baseLevel >= outpostInfo(o.type).need &&
       d < 2.4 &&
       !movementRequested()
@@ -2132,6 +2134,7 @@ function updateOutposts(dt) {
           sfx("coal");
         } else if (o.type === "ironmine") {
           iron += 2;
+        if(expedition.pilot){spawnPickupTrail(o.x,1.8,o.z,0xb9e7ef,2,player.position.clone(),2);worldPop("鉄 +2",o.g.position.clone().add(new THREE.Vector3(0,2,0)),"#bdeaff");}
           sfx("iron");
         }
         updateHUD();
@@ -2141,6 +2144,8 @@ function updateOutposts(dt) {
 }
 
 function activeOutposts() {
+  // The expedition rules use logistics sites, not a second combat front. Legacy campaigns retain it.
+  if(expedition.pilot)return [];
   return outposts.filter((o) => o.captured && o.hp > 0);
 }
 
@@ -2232,10 +2237,7 @@ function addBuildPads() {
     // One footprint outline, at the actual building location. No second disc or offset marker.
     const g = new THREE.Group();
     g.position.set(x, 0, z);
-    const sign=box(.85,.58,.13,0x315361);sign.position.set(.2,1.15,.1);g.add(sign);
-    const peg=box(.12,.9,.12,0xa88658);peg.position.set(.2,.8,.1);g.add(peg);
-    const mark=box(.4,.08,.04,0xffd48a);mark.position.set(.2,1.15,.19);g.add(mark);
-    for(let j=0;j<3;j++){const log=box(.7,.17,.18,0xb98c55);log.position.set(-.55,.65+j*.16,.15);g.add(log);}
+    const ghost=makeBuildSilhouette(type,x,z);g.add(ghost);
     scene.add(g);
     const tag = makeGroundTag(typeIcon(type), "");
     tag.position.set(x, 0.56, z);
@@ -2293,6 +2295,7 @@ function addWallDecor(x, y, z, level = 1) {
     wallDecorObjs.delete(k);
   }
     const g = makeWallModel(x,z,level);
+    evolveDefenseModel(g,'wall',level);
     g.position.set(x,y-.5,z);scene.add(g);wallDecorObjs.set(k,g);
 }
 function makeWallModel(x,z,level=1) {
@@ -2353,6 +2356,7 @@ function addFlameVisual(x, y, z, level = 1) {
     ]);
   g.position.set(x, y, z);
   scene.add(g);
+  evolveDefenseModel(g,'flame',level);
   g.userData.level = level;
   flameObjs.set(k, g);
 }
@@ -2383,6 +2387,7 @@ function addWarehouseVisual(x, y, z, level = 1) {
   g.position.set(x, y, z);
   scene.add(g);
   g.userData.level = level;
+  evolveDefenseModel(g,'warehouse',level);
   warehouseObjs.set(k, g);
 }
 
@@ -2416,6 +2421,7 @@ function makeTurretModel(level = 1) {
     const brace=box(.17,1.85,.18,0xb69260);brace.position.set(side*.77,.52,0);brace.rotation.x=side*.82;g.add(brace);
   }
   if(level>1)addVoxelDetails(g,[[.28,.6,.28,0xe1af55,.96,2.13,-.85],[.48,.15,.48,frame,.96,2.5,-.85]]);
+    evolveDefenseModel(g,'turret',level);
     g.userData.level = level;
     return g;
 }
@@ -2574,6 +2580,25 @@ function updateDefenseCombat(dt, t) {
   }
 }
 
+// Empty sites show the thing that can be built, at its actual footprint.
+function makeBuildSilhouette(type,x,z){
+  const g=new THREE.Group(),material=new THREE.MeshBasicMaterial({color:type==='flame'?0xb97840:type==='warehouse'?0x428879:0x3e7186,transparent:true,opacity:.36,depthWrite:false,depthTest:true});
+  const add=(w,h,d,px,py,pz)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);m.position.set(px,py,pz);m.renderOrder=3;g.add(m);const edge=new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),new THREE.LineBasicMaterial({color:0x245568,transparent:true,opacity:.65,depthWrite:false,depthTest:true}));edge.position.copy(m.position);edge.renderOrder=4;g.add(edge);};
+  if(type==='turret'){
+    for(const a of [-.72,.72])for(const b of [-.72,.72])add(.24,2.4,.24,a,1.55,b);
+    add(2,.25,2,0,2.65,0);add(2.25,.3,2.2,0,3.55,0);add(1.5,.22,.25,0,3.0,.9);add(.22,.22,1.4,0,3.0,.7);
+  }else if(type==='flame'){
+    add(1.55,1.1,1.3,0,1.2,0);for(const a of [-.5,.5])add(.35,1.1,.35,a,2.1,-.4);add(.8,.35,.9,0,1.35,.9);
+  }else if(type==='warehouse'){
+    for(const a of [-.8,.8])add(.22,1.55,.22,a,1.3,.65);add(2.2,.28,1.7,0,2.2,0);add(1.7,.9,.5,0,1.1,-.55);
+    add(.85,.22,.12,0,1.65,.8);add(.22,.85,.12,0,1.65,.8);
+  }else{
+    for(const a of [-1.6,-.8,0,.8,1.6])add(.3,1.5,.35,a,1.25,0);add(3.9,.2,.4,0,1.3,0);
+    if(Math.abs(x)>=Math.abs(z))g.rotation.y=Math.PI/2;
+  }
+  return g;
+}
+
 
 // ---- player ----
 // player system — v12, integrated from the deployed v11.
@@ -2584,7 +2609,7 @@ let shootPose = 0,
 function buildPlayer() {
   if (player) disposeObject(player);
   player = new THREE.Group();
-  player.scale.setScalar(1.18);
+  player.scale.setScalar(.94);
   shootPose = 0;
   rifle = new THREE.Group();
   rifle.visible = false;
@@ -3185,7 +3210,7 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
           : makeRaider(scale);
   if (kind !== "boss") {
     colorizeEnemy(model.g, kind);
-    model.g.scale.multiplyScalar(1.15);
+    model.g.scale.multiplyScalar(1.38);
   }
   const hpBase =
       {
@@ -3302,6 +3327,7 @@ function updateEnemies(dt, t) {
       enemies.splice(i, 1);
       wood += 4;
       coal += 2;
+      worldPop("木材 +4 · 石炭 +2",g.position.clone().add(new THREE.Vector3(0,2,0)),"#ffe4ac");
       spawnPickupTrail(g.position.x,1.2,g.position.z,0xe3ba79,2,player.position.clone(),enemies.length===0||e.kind==='boss'?2.7:2);
       spawnPickupTrail(g.position.x,1.2,g.position.z,0x8ea4c4,1,player.position.clone(),2);
       kills++;
@@ -3801,6 +3827,7 @@ function updateObjective() {
 const resourceHudValues = new Map();
 function updateHUD() {
   $("gameViewport").setAttribute("data-phase", phase);
+  $("gameViewport").setAttribute("data-iron",String(baseLevel>=3||iron>0));
   for (const [id, value] of [
     ["wood", wood],
     ["coal", coal],
@@ -4055,7 +4082,7 @@ function projectGroundTags(t) {
     hudBottom = $("hud").getBoundingClientRect().bottom + 18;
   const focused = running ? focusedGroundTag() : null;
   const nearestLabels = groundTagMeshes
-    .filter((g) => g.userData.pad && !g.userData.built && !g.userData.locked)
+    .filter((g) => g.userData.pad && !g.userData.built && !g.userData.locked && buildPads.find(p=>p.tag===g)?.g.visible)
     .sort((a, b) => groundTagDistance(a) - groundTagDistance(b))
     .slice(0, 2);
   for (const g of groundTagMeshes) {
@@ -4077,7 +4104,15 @@ function projectGroundTags(t) {
     );
     el.style.visibility = "hidden";
     if(phase === "night"){ring.visible=false;continue;}
-    // The action panel owns costs; floating cards would cover the player and hearth.
+    // Two small resource marks stay attached to nearby empty sites; no explanation cards.
+    const p=pad&&buildPads.find(p=>p.tag===g);
+    if(!running||paused||!p||p.built||p.constructing||!p.g.visible||!nearestLabels.includes(g)||groundTagDistance(g)>7.5)continue;
+    const pos=new THREE.Vector3(p.x+1,.4,p.z+.6).project(camera);
+    const x=(pos.x*.5+.5)*rect.width,y=(-pos.y*.5+.5)*rect.height;
+    if(pos.z>1||x<34||x>rect.width-34||y<hudBottom||y>rect.height-80)continue;
+    const cost=getBuildCost(p);el.innerHTML='<i class="pict wood" aria-hidden="true"></i><b>'+cost.wood+'</b>'+(cost.coal?'<i class="pict coal" aria-hidden="true"></i><b>'+cost.coal+'</b>':'');
+    el.className='groundHud siteCost';el.style.display='flex';el.hidden=false;el.style.visibility='visible';el.style.left=x+'px';el.style.top=y+'px';
+
   }
 }
 
@@ -5327,7 +5362,7 @@ function resumeRun() {
     nightAssault = s.nightAssault ? { ...s.nightAssault } : null;
     if(nightAssault && nightAssault.version!==2){nightAssault.index=assaultIndex();nightAssault.version=2;if(nightAssault.mode==='second')nightAssault.reserve=0;}
     bossFlank = s.bossFlank ? { ...s.bossFlank } : null;
-      campPlan = s.campPlan || "none"; dawnScene=null; trackedOutpost=['invest','salvage','engineer'].includes(expedition.route)?expeditionSite(expedition.route)?.type:null; outpostNotice=null;
+      campPlan = s.campPlan || "none"; dawnScene=null; trackedOutpost=['invest','salvage','engineer','iron'].includes(expedition.route)?expeditionSite(expedition.route)?.type:null; outpostNotice=null;
       $("dawnPanel").hidden=true;
     blocks = new Map(s.blocks);
     defenseState.clear();
@@ -5725,6 +5760,7 @@ function rewardIcon(kind){
 }
 
 function showUpgradeCards(savedPicks = null) {
+  beginScreenInput();
   $("hud").classList.remove("hidden");
   upgrading = true;
   running = false;
@@ -5798,7 +5834,9 @@ function showUpgradeCards(savedPicks = null) {
     const b = document.createElement("button");
     b.className = "upCard";
     b.innerHTML = `${rewardIcon(u.icon)}<b>${u.name}</b><span>${u.desc}</span>`;
-    b.onclick = () => {
+    bindScreenAction(b, () => {
+      if(!upgrading||!activeUpgradePicks)return;
+      beginScreenInput();
       u.apply();
         dawnScene = null; $("dawnPanel").hidden=true;
       defenseState.forEach((st, k) => {
@@ -5829,7 +5867,7 @@ function showUpgradeCards(savedPicks = null) {
       const advice = preparationAdvice();
       showWaveBanner("☀️ DAY " + day, advice.title);
       toast(advice.sub);
-    };
+    },()=>upgrading&&!dawnScene&&!$("upgrade").classList.contains("hidden"));
     wrap.appendChild(b);
   });
   $("upgrade").classList.remove("hidden");
@@ -5996,6 +6034,7 @@ function defenseTargetScore(enemy, distance) {
 function showUpgrade(savedPicks = null) {
   if (savedPicks) { dawnScene=null; $("dawnPanel").hidden=true; return showUpgradeCards(savedPicks); }
   if (dawnScene) return;
+  beginScreenInput();
   upgrading=true; running=false; activeUpgradePicks=chooseCampRewards(); resetInput();
   for(const id of ["raidDirection","furnaceDirection","waypoint"]) $(id).hidden=true;
   if(guideRing)guideRing.visible=false;
@@ -6018,13 +6057,13 @@ function updateDawnScene(dt) {
     $("dawnDetail").textContent=settlementObjs.length>old?`住居が ${old} → ${settlementObjs.length}棟へ。次の夜に備えよう`:`${defenseState.size}の設備と灯を守った。強化を選び、傷んだ設備を整えよう`;
   }
   nightK=s.night*(1-q);sun.intensity=1.3-nightK*1.02;hemi.intensity=1.1-nightK*.72;
-  if(settings.motion){camera.position.lerpVectors(s.from,new THREE.Vector3(12,20,23),q*q*(3-2*q));camera.lookAt(s.look.x*(1-q),0,s.look.z*(1-q));for(const g of s.newHomes||[])g.scale.setScalar(.2+.8*q);}
+  if(settings.motion){camera.position.lerpVectors(s.from,new THREE.Vector3(12,20,23),q*q*(3-2*q));camera.lookAt(s.look.x*(1-q),0,s.look.z*(1-q));for(const g of s.newHomes||[])g.scale.setScalar((baseLevel>=4?1.28:1.12)*(.2+.8*q));}
   updateParticles(dt);
-  if(s.t>2.25)finishDawnScene();
+  // The player opens the choices; no automatic swap under an approaching finger.
 }
 function finishDawnScene(){
   if(!dawnScene)return;
-  for(const g of dawnScene.newHomes||[])g.scale.setScalar(1);
+  for(const g of dawnScene.newHomes||[])g.scale.setScalar(baseLevel>=4?1.28:1.12);
   dawnScene=null;$("dawnPanel").hidden=true;showUpgradeCards(activeUpgradePicks);
 }
 function postThreat(o){return enemies.filter(e=>e.targetOutpost===o&&e.hp>0).length;}
@@ -6297,7 +6336,7 @@ function updateEdgeCues(){
 // One optional expedition rule across all chapters. Legacy runs retain their assets.
 let expedition={version:1,pilot:false,facility:'untouched',engineer:false,usedNight:0,paidDay:1,work:null}, expeditionChoice=null;
 function expeditionReset(){expedition={version:1,pilot:true,facility:'untouched',engineer:false,usedNight:0,paidDay:1,work:null};expeditionChoice=null;$('gameViewport').classList.remove('choice-open');$('expeditionPanel').hidden=true;}
-function expeditionSite(kind){return outposts.find(o=>o.type===(kind==='engineer'?'survivor':'sawmill'));}
+function expeditionSite(kind){return outposts.find(o=>o.type===(kind==='iron'?'ironmine':kind==='engineer'?'survivor':'sawmill'));}
 function expeditionCost(kind){return kind==='invest'?{wood:90,coal:30}:kind==='engineer'?{wood:35}:{};}
 function expeditionGlyph(kind){
  if(kind==='engineer')return equipmentGlyph('warehouse');
@@ -6338,7 +6377,7 @@ function confirmExpedition(){
 }
 function updateExpedition(dt){
  if(!expedition.pilot)return;
- for(const o of outposts){const active=o.type==='sawmill'||o.type==='survivor';o.g.visible=active;o.tag.userData.suppressed=!active;}
+ for(const o of outposts){const active=o.type==='sawmill'||o.type==='survivor'||o.type==='ironmine';o.g.visible=active;o.tag.userData.suppressed=!active;}
  if(day>expedition.paidDay){
   // Payment only for mornings actually reached; never extrapolate offline time.
   if(expedition.facility==='invested'){wood+=36;worldPop('製材所の納品 · 木材36',new THREE.Vector3(0,2,0),'#ffda88');sfx('wood');}
@@ -6356,6 +6395,8 @@ function updateExpedition(dt){
 }
 function expeditionActions(){
  if(!expedition.pilot)return [];
+ const mine=outposts.find(o=>o.type==='ironmine');
+ if(phase==='day'&&mine&&Math.hypot(mine.x-pPos.x,mine.z-pPos.z)<2.4)return [{id:'ironmine',title:mine.captured?'鉄鉱山・稼働中':'鉄鉱山を稼働',manual:true,available:baseLevel>=3&&!mine.captured,cost:{},effect:baseLevel<3?'集落Lv.3で採掘可能':'昼に4.2秒ごと鉄2・Lv.4に鉄20',button:mine.captured?'採掘中':baseLevel<3?'集落Lv.3で解放':'採掘を始める',x:mine.x,z:mine.z,distance:0,tag:mine.tag,apply:()=>{if(baseLevel<3||mine.captured||phase!=='day')return false;mine.captured=true;mine.everCaptured=true;mine.hp=240;mine.prodT=0;expedition.route=null;trackedOutpost=null;sfx('capture');worldPop('鉄鉱山・稼働',mine.g.position.clone().add(new THREE.Vector3(0,2,0)),'#bdeaff');return true;}}];
  if(phase==='day'&&day>=2){const o=[expeditionSite('invest'),expeditionSite('engineer')].find(o=>Math.hypot(o.x-pPos.x,o.z-pPos.z)<2.4);
   if(o){
    const kind=o.type==='survivor'?'engineer':(['invest','salvage'].includes(expedition.route)?expedition.route:'invest');
@@ -6374,9 +6415,11 @@ function updateExpeditionCard(){$('outpostCard').hidden=true;}
 
 // ---- context-actions ----
 // A press owns an immutable quote. Movement, target changes and lifecycle changes invalidate it.
+let routeMenuOpen=false;
 let contextChoice=null, contextChoosing=false, contextArmed=null, contextRevision=0;
 let contextLastCommit=-Infinity, contextPreview=null, contextPreviewKey='';
 function cancelContext(){
+  routeMenuOpen=false;
   contextChoice=null;contextChoosing=false;contextArmed=null;contextRevision++;
   $('contextOptions').hidden=true;$('contextPause').hidden=true;
 }
@@ -6446,7 +6489,7 @@ function renderContextOptions(a,p){
   const box=$('contextOptions'),mode=contextChoice?.mode;
   const st=p&&defenseState.get(key(p.x,1,p.z));
   const sig=[a.id,mode,p?.type,st?.type,st?.level,baseLevel,equipmentUsed(),wood,coal,expedition.route].join('|');
-  const show=!!mode||(p&&!st&&introStep>=3);
+  const show=!!mode;
   box.hidden=!show;if(!show)return;
   if(box._signature===sig)return;box._signature=sig;for(const child of [...box.children])child.remove();
   if(mode==='info')return;
@@ -6478,13 +6521,21 @@ function updateContextRoutes(){
   const box=$('routeChoices');box.hidden=!running||paused||introStep<4||day<2||phase!=='day'||!expedition.pilot;
   const charge=$('engineerCharge');charge.hidden=!running||paused||phase!=='night'||!expedition.engineer;
   charge.textContent=expedition.usedNight===day?'✚ 今夜は使用済み':'✚ 応急修理 1回';charge.style.opacity=expedition.usedNight===day?'.38':'1';
-  if(box.hidden)return;
-  const sig=[day,expedition.route,expedition.facility,expedition.engineer,!!expedition.work].join('|');if(box._signature===sig)return;box._signature=sig;
+  if(box.hidden){routeMenuOpen=false;box.setAttribute('data-open','false');return;}
+  const sig=[day,baseLevel,expedition.route,expedition.facility,expedition.engineer,!!expedition.work,routeMenuOpen].join('|');if(box._signature===sig)return;box._signature=sig;
   for(const c of [...box.children])c.remove();
+  box.setAttribute('data-open',String(routeMenuOpen));
+  const names={iron:'鉄鉱山',invest:'製材所',salvage:'解体',engineer:'技師'};
+  const toggle=optionButton(box,'',false,()=>String(day)+phase+routeMenuOpen,()=>{routeMenuOpen=!routeMenuOpen;updateContextRoutes();});
+  toggle.className='routeToggle';toggle.setAttribute('aria-label',routeMenuOpen?'地図を閉じる':'行き先の地図を開く');toggle.setAttribute('aria-expanded',String(routeMenuOpen));
+  toggle.innerHTML='<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12"/><path d="m21 10-3 9-8 3 3-9Z"/></svg><span>'+(routeMenuOpen?'閉じる':names[expedition.route]||'地図')+'</span>';
+  if(!routeMenuOpen)return;
+  const menu=document.createElement('div');menu.className='routeMenu';box.appendChild(menu);
+  if(baseLevel>=3)optionButton(menu,'鉄鉱山',false,()=>String(day)+phase,()=>{cancelContext();expedition.route='iron';trackedOutpost='ironmine';saveRun();updateContextRoutes();});
   for(const kind of ['invest','salvage','engineer']){
-    const disabled=!!expedition.work||(kind==='engineer'?expedition.engineer:expedition.facility!=='untouched');
-    const names={invest:'製材所を修復',salvage:'製材所を解体',engineer:'技師を救出'};
-    const b=optionButton(box,(expedition.route===kind?'◆ ':'')+names[kind]+'へ案内',disabled,()=>[phase,day,expedition.facility,expedition.engineer,!!expedition.work].join('|'),()=>chooseRoute(kind));b.title=expeditionDescription(kind);
+    const disabled=!!expedition.work||(kind==='engineer'?expedition.engineer:expedition.facility!=='untouched');if(disabled)continue;
+    const label={invest:'製材所を修復',salvage:'製材所を解体',engineer:'技師を救出'}[kind];
+    const b=optionButton(menu,label,false,()=>[phase,day,expedition.facility,expedition.engineer,!!expedition.work].join('|'),()=>chooseRoute(kind));b.title=expeditionDescription(kind);
   }
 }
 function updateContextUI(){
@@ -6504,7 +6555,8 @@ function updateContextUI(){
   $('contextExchange').hidden=!st||phase!=='day';
   $('contextClose').hidden=!contextChoice;
   $('contextPause').hidden=!contextChoosing;
-  $('contextInfo').textContent=a.id==='expedition:sawmill'?'⋯':'ⓘ';
+  $('contextInfo').textContent=p&&!st?'⇄':'ⓘ';
+  $('contextInfo').setAttribute('aria-label',p&&!st?'施設の種類を選ぶ':'設備の詳細');
   renderContextOptions(a,p);updateContextPreview(a,p);
   // Anchor the one target card beneath its world position, within the safe play area.
   const rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(a.x,.5,a.z).project(camera);
@@ -6519,6 +6571,7 @@ function updateContextUI(){
 function updateContextPreview(a,p){
   const type=contextChoice?.previewType||a.previewType||(a.id.startsWith('build:')?'wall':null),lv=contextChoice?.previewType?(defenseState.get(key(a.x,1,a.z))?.level||1):a.previewLevel||1;
   if(!type){if(contextPreview)contextPreview.visible=false;return;}
+  if(p&&!p.built&&type===p.type){if(contextPreview)contextPreview.visible=false;return;}
   const sig=[a.id,type,lv].join('|');
   if(sig!==contextPreviewKey){
     if(contextPreview){scene.remove(contextPreview);contextPreview.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});}
@@ -6543,8 +6596,75 @@ function updateContextPreview(a,p){
 function bindContextControls(){
   bindFreshPress($('confirmDefense'),()=>contextQuote(contextCurrent()),executeContext);
   bindFreshPress($('contextExchange'),()=>contextQuote(contextCurrent()),()=>beginContextChoice('exchange'));
-  bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id==='expedition:sawmill'?'expedition':'info'));
+  bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id==='expedition:sawmill'?'expedition':contextPad()&&!contextPad().built?'type':'info'));
   bindFreshPress($('contextClose'),()=>contextQuote(contextCurrent()),()=>{cancelContext();updateDwell(0);});
+}
+
+// Dawn and reward screens own separate input epochs. A release cannot cross screens.
+let screenInputEpoch=0, screenOpenedAt=0;
+function beginScreenInput(){screenInputEpoch++;screenOpenedAt=Date.now();contextArmed=null;}
+function bindScreenAction(button,commit,ready=()=>true){
+  let press=null;
+  const available=()=>!document.hidden&&!paused&&ready()&&Date.now()-screenOpenedAt>=320;
+  button.addEventListener('pointerdown',e=>{e.preventDefault();if(e.button>0||!available())return;press={id:e.pointerId,epoch:screenInputEpoch,x:e.clientX,y:e.clientY};button.setPointerCapture?.(e.pointerId);});
+  button.addEventListener('pointermove',e=>{if(press&&Math.hypot(e.clientX-press.x,e.clientY-press.y)>9)press=null;});
+  button.addEventListener('pointerup',e=>{e.preventDefault();const a=press;press=null;if(!a||a.id!==e.pointerId||a.epoch!==screenInputEpoch||!available())return;const r=button.getBoundingClientRect();if(e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom)commit();});
+  button.addEventListener('pointercancel',()=>press=null);button.addEventListener('lostpointercapture',()=>press=null);
+  button.addEventListener('keydown',e=>{if(!['Enter','Space'].includes(e.code))return;e.preventDefault();if(!e.repeat&&available())press={id:e.code,epoch:screenInputEpoch};});
+  button.addEventListener('keyup',e=>{if(!['Enter','Space'].includes(e.code))return;e.preventDefault();const a=press;press=null;if(a?.id===e.code&&a.epoch===screenInputEpoch&&available())commit();});
+  button.addEventListener('click',e=>e.preventDefault());
+}
+
+function updateFurnaceEvolution(){
+  if(fireGroup.userData.evolutionLevel===baseLevel)return;
+  if(fireGroup.userData.evolution)disposeObject(fireGroup.userData.evolution);
+  const g=new THREE.Group();fireGroup.add(g);fireGroup.userData.evolution=g;fireGroup.userData.evolutionLevel=baseLevel;
+  const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);};
+  if(baseLevel>=2){
+    for(const x of [-1.15,1.15]){add(.4,1.65,.6,0x526f78,x,.95,-.45);add(.6,.22,.8,0xd9e6df,x,1.83,-.45);add(.18,.46,.08,0xffce72,x,1.14,.0);}
+    add(2.65,.28,1.1,0x45616c,0,.32,-.65);add(1.8,.95,.6,0x41616d,0,.95,-.85);
+  }
+  if(baseLevel>=3){
+    add(1.75,1.5,.95,0x3e6372,0,1.6,-.85);add(2.15,.25,1.25,0xc6dcdf,0,2.48,-.85);
+    add(.55,1.65,.55,0x344f5b,-.65,3.08,-.85);add(.8,.2,.8,0xe3ede5,-.65,3.96,-.85);
+    for(const x of [-.48,.48])add(.34,.58,.08,0xffbb60,x,1.8,-.31);
+  }
+  if(baseLevel>=4){
+    for(const x of [-1.5,1.5]){add(.4,2.8,.5,0x7695a0,x,1.65,-.4);add(.65,.2,.75,0xe4eeea,x,3.13,-.4);add(.65,.44,.15,0xffd083,x,2.7,-.08);}
+    add(3.45,.32,1.5,0x355464,0,3.1,-.8);add(3.55,.15,1.65,0xe1ece7,0,3.34,-.8);
+    add(.25,2.2,.25,0xadbdbe,.85,3.65,-.95);add(.8,.55,.1,0xf0b960,1.18,4.15,-.92);
+  }
+}
+function evolveDefenseModel(g,type,level){
+  g.scale.multiplyScalar(type==='wall'?1:1.08);
+  const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);};
+  if(level>=2){
+    if(type==='turret'){
+      add(1.9,.75,1.9,0x547079,0,.15,0);
+      for(const x of [-.8,.8])add(.32,1.6,.5,0x728e92,x,.85,.7);
+      add(1.85,.28,.35,0xe2ae5e,0,1.98,1.05);
+    }else if(type==='flame'){
+      for(const x of [-.6,.6]){add(.46,1.55,.46,0x65828a,x,2.3,-.4);add(.62,.18,.62,0xd5e3da,x,3.12,-.4);}
+      add(1.65,.25,1.45,0xd39b56,0,.9,0);
+    }else if(type==='warehouse'){
+      add(2.15,.23,1.75,0x507a83,0,2.05,0);add(.18,1.6,.18,0xb4915d,-.92,1.3,.8);add(.18,1.6,.18,0xb4915d,.92,1.3,.8);
+      add(1.6,.7,.45,0xd7b47a,0,1.25,-.7);
+    }else{add(3.9,.55,.68,0x607f87,0,.72,0);for(const x of [-1.7,1.7])add(.5,2.25,.65,0x587783,x,1.16,0);}
+  }
+  if(level>=3){
+    if(type==='turret'){
+      for(const x of [-.86,.86])add(.28,1.4,.28,0x456777,x,2.25,-.75);
+      add(2.55,.25,2.3,0x3b6173,0,3.2,0);add(2.65,.16,2.4,0xe2ece5,0,3.4,0);
+      for(const x of [-.6,.6])add(.18,.24,1.6,0xffc166,x,2,1.25);
+      add(.17,1.1,.17,0xd9ac62,.85,3.86,-.7);add(.7,.48,.1,0xd79c46,1.1,4.1,-.7);
+    }else if(type==='flame'){
+      for(const x of [-.85,.85]){add(.55,1.45,.9,0x426775,x,1.52,0);add(.4,.6,.12,0xffc978,x,1.5,.52);}
+      add(1.3,.42,.7,0xe8b764,0,1.35,.95);
+    }else if(type==='warehouse'){
+      add(2.15,1.3,1.2,0x759296,0,1.25,-.2);add(2.5,.3,1.95,0x365d6c,0,2.25,-.1);add(2.55,.17,2,0xddeae2,0,2.49,-.1);
+      for(const x of [-.7,.7])add(.35,.45,.1,0xffcd78,x,1.55,.45);
+    }else{for(const x of [-1.7,1.7]){add(.72,2.8,.85,0x567784,x,1.5,0);add(.85,.25,.95,0xd7e5e4,x,3,0);add(.2,.55,.14,0xffd185,x,2.4,.5);}}
+  }
 }
 
 
@@ -6604,7 +6724,7 @@ function boot() {
   try {
     loadCampaignProgress();
     bindSessionUI();
-    $("dawnSkip").onclick = finishDawnScene;
+    bindScreenAction($("dawnSkip"),finishDawnScene,()=>!!dawnScene&&dawnScene.t>.45);
     $("outpostCard").onclick = () => {if(expedition.pilot)return;const type=$("outpostCard").dataset.type;trackedOutpost=trackedOutpost===type?null:type;};
     $("victorySkip").onclick = () => {
       if (victoryScene) {
