@@ -1336,3 +1336,48 @@ body{font-family:system-ui,-apple-system,"Yu Gothic",sans-serif;color:var(--ice)
 #gameViewport[data-phase="night"] #hud .chip{grid-column:auto;min-width:0!important;width:auto;margin:0;padding:6px}
 #gameViewport[data-phase="night"] #hud .chip b{font-size:18px;line-height:1.15}
 #baseCap{display:block;font-size:10px!important;line-height:1.1}
+
+/* v46: carved brass actions and quiet spruce surfaces, shared across game states. */
+:root{--ink:#132f39;--spruce:#234a54;--brass:#dfb773;--snow:#ecf1e8}
+button{font-family:inherit;font-weight:700;transition:transform .12s,filter .12s,box-shadow .12s}
+button:focus-visible{outline:2px solid var(--snow);outline-offset:3px}
+button:active:not(:disabled){transform:translateY(2px);filter:brightness(1.08)}
+button:disabled{filter:saturate(.35);opacity:.58}
+#startBtn,#continueBtn,#resumeBtn,#retryBtn,#confirmDefense,#expeditionConfirm,#equipmentConfirm,#dawnSkip{
+ border:1px solid #e6c68f;border-bottom:3px solid #987547;border-radius:5px;
+ background:linear-gradient(175deg,#f2d59d,#d7ad6d);color:#17353c;box-shadow:inset 0 1px #fff0cc,0 4px 0 #203a3e,0 7px 14px #06182040;text-shadow:none;letter-spacing:.035em;
+}
+#actionPanel{border:1px solid #78928b66;border-top:2px solid #d8b579;border-radius:6px;background:#153640f2;box-shadow:0 8px 22px #08212e55;padding:13px}
+#actionTitle{color:#f0e3c8;font-size:16px;letter-spacing:.02em}
+#contextInfo,#contextExchange,#contextClose,#pauseBtn,.routeToggle,#siteInspect{border-radius:5px;background:#244a54;border:1px solid #829b9866;color:#e4eadd;box-shadow:inset 0 1px #acc4bb33}
+.overlay{background:linear-gradient(180deg,#102c387a,#102c38db 55%,#0b2632f5);backdrop-filter:blur(2px)}
+.overlay h1,.overlay h2{text-shadow:none;color:#f2e7d1}
+#title{justify-content:flex-end;padding:24px 24px 28px;background:linear-gradient(180deg,#102c3820 0%,#102c3820 32%,#102c38d9 60%,#102c38fa 100%);backdrop-filter:none;gap:0}
+#title .eyebrow{position:absolute;top:34px;letter-spacing:.2em;font-size:11px;color:#e6e9d8}
+#title h1{position:absolute;top:60px;left:0;width:100%;font-family:Georgia,'Times New Roman',serif;font-size:51px;line-height:.85;letter-spacing:.14em;font-weight:700;color:#f5ecd7;text-shadow:0 3px 0 #21444b}
+#title h1 span{display:block;font:700 17px/2.5 system-ui;letter-spacing:.5em;padding-left:.5em;color:#dabc87}
+#title h2{position:absolute;top:155px;letter-spacing:.3em;font-size:13px;color:#ece9d7}
+#title .titleEmblem,#title .titleLead{display:none}
+#title #stageSelect{display:flex;gap:8px;margin:10px 0}
+#title .stageChoice{border-radius:3px;min-height:36px;background:#183b47b8;border:1px solid #728d88;color:#adc2bf;font-size:11px;padding:8px 14px;box-shadow:none}
+#title .stageChoice.selected{background:#c9ab77;color:#173640;border-color:#ebd6ac}
+#title #stageDescription{font-size:12px;line-height:1.6;margin:0 0 13px;max-width:300px}
+#title .btn{width:min(320px,100%);min-height:48px;padding:12px;font-size:16px;margin:5px 0}
+#title #campaignNote,#title .controlNote{font-size:10px;line-height:1.65;margin:9px 0 0;color:#99b6b6}
+#title #journeyStart{margin:8px 0 0;width:min(320px,100%);padding:12px;color:#e5ce9e;background:#20434a;border:1px solid #bfa370;border-radius:4px;font-size:13px}
+#title #campAlbum{display:none}#campaignRecord{font-size:10px!important;margin:0 0 8px!important}
+#pausePanel{padding:28px;gap:12px}#pausePanel h1{font-family:Georgia,serif;font-size:30px;letter-spacing:.12em;margin:0}
+#pausePanel .campRules{font-size:11px;line-height:1.8;color:#afc5c4;text-align:left;border-top:1px solid #6d8a8555;padding-top:12px;margin:0}
+#pausePanel .settingsGrid{border-radius:4px;background:#163b4477;border:1px solid #6e8d8755;padding:14px;gap:14px}
+.secondaryBtn{border:1px solid #819990;border-radius:4px;background:#183d48;color:#cfddd5;box-shadow:none}
+#upgrade h1{font-family:Georgia,serif;font-size:30px;letter-spacing:.12em}
+#upgradeCards button{border-radius:5px;border:1px solid #799088;border-left:4px solid #d9b577;background:linear-gradient(110deg,#294e55,#173a46);color:#f0e6ce;box-shadow:0 4px 0 #0b2832;text-align:left}
+#dawnPanel,#gameover{background:linear-gradient(180deg,#102c3800,#102c3822 40%,#102c38ef 72%)}
+#dawnPanel h2,#goTitle{font-family:Georgia,'Yu Mincho',serif;letter-spacing:.045em;text-shadow:none}
+#gameover .btn,#gameover .secondaryBtn{width:min(310px,90%);padding:13px;font-size:16px}
+#hud .chip{border-radius:5px;border:1px solid #74959466;background:#193e49ec;box-shadow:inset 0 1px #b5cebe22}
+#journey{border-radius:3px;border-left:2px solid #ddb77e;background:#163944e8}
+[data-motion='false'] button{transition:none}
+@media(max-height:650px){#title h1{top:45px;font-size:39px}#title h2{top:124px}#title .eyebrow{top:22px}#title{padding:18px 22px}#title .controlNote{display:none}#pausePanel{padding:18px;gap:6px}#pausePanel .campRules{font-size:10px}#pausePanel .settingsGrid{padding:10px}}
+
+#title .btn,#pausePanel .btn{border-radius:5px;background:linear-gradient(#e4c489,#c9a567);color:#183741;box-shadow:0 4px 0 #80633b;border:1px solid #f0d7a6}

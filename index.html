@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>フロスト・ディフェンス — 灯の集落</title>
-    <link rel="stylesheet" href="styles/game.css?v=45" />
+    <link rel="stylesheet" href="styles/game.css?v=46" />
   </head>
   <body>
     <div id="gameViewport">
@@ -57,9 +57,9 @@
           <small>鉄</small><b>⚙️ <span id="iron">0</span></b>
         </div>
         <div class="chip status">
-          <small>STAGE <span id="stageNumber">1</span></small
+          <small><span id="stageKind">STAGE</span> <span id="stageNumber">1</span></small
           ><b
-            ><span id="phase">🌞</span> <span id="day">1</span><em>/ 7日</em></b
+            ><span id="phase">🌞</span> <span id="day">1</span><em id="dayTotal">/ 7日</em></b
           >
         </div>
         <div class="chip status">
@@ -109,7 +109,7 @@
       <div id="title" class="overlay">
         <div class="eyebrow">雪の向こうに、暮らしを。</div>
         <div class="titleEmblem" aria-hidden="true"><i></i><i></i><i></i></div>
-        <h1>FROST<br><strong>DEFENSE</strong></h1>
+        <h1>FROST<span>DEFENSE</span></h1>
         <h2>灯の集落</h2>
         <p class="titleLead">
           木を集め、灯を育て、<br />小さな集落の夜を守る。
@@ -120,15 +120,15 @@
         <figure id="campAlbum" hidden><img id="campPortrait" alt="前回守り抜いた集落"><figcaption id="campAlbumText"></figcaption></figure>
         <button class="btn" id="continueBtn" hidden>つづきから</button>
         <button class="btn" id="startBtn">はじめる</button>
-        <p id="campaignNote"></p>
+        <button id="journeyStart" class="secondaryBtn" hidden></button><p id="campaignNote"></p>
         <p class="controlNote">
-          指1本で移動 · 採集と射撃は自動<br />建築は、そばで指を離すだけ
+          指1本で移動 · 採集と射撃は自動<br />建築は、そばで指を離してタップ
         </p>
         <p id="startupError" role="alert" hidden></p>
       </div>
       <div id="pausePanel" class="overlay hidden">
-        <div class="eyebrow">ひと休み</div>
-        <h1>灯は、ここで待っています</h1>
+        <div class="eyebrow">灯の集落</div>
+        <h1>ひと休み</h1>
         <p id="pauseCaption"></p><p class="campRules">拠点HP0で敗北。木材30＋石炭5で修理。<br>炉は石炭10で40%回復・昼も回復。消火中は防衛射撃が25%遅くなる。<br>拠点Lvで武器と外周が成長。施設は拠点Lv＋1、最大Lv5。</p>
         <button id="resumeBtn" class="btn">つづける</button>
         <div class="settingsGrid">
@@ -157,7 +157,7 @@
         <button id="homeBtn" class="secondaryBtn">保存してタイトルへ</button>
       </div>
       <div id="gameover" class="overlay hidden">
-        <h1 id="goTitle">🧊 炉の火が消えた…</h1>
+        <h1 id="goTitle">集落を守りきれなかった</h1>
         <h2 id="goSub"></h2>
         <p id="goStat"></p>
         <p id="resultInsight" class="resultInsight"></p>
@@ -166,12 +166,12 @@
         <button class="btn" id="retryBtn">もう一度挑戦</button>
       </div>
       <div id="upgrade" class="overlay hidden">
-        <h1>生存ボーナス</h1>
-        <h2>次の夜に備えて1つ強化</h2>
+        <h1>明日の支度</h1>
+        <h2>村に残すものを、ひとつ。</h2>
         <div id="upgradeCards"></div>
       </div>
     </div>
     <script src="vendor/three-0.160.0.min.js"></script>
-    <script src="dist/game.js?v=45"></script>
+    <script src="dist/game.js?v=46"></script>
   </body>
 </html>
