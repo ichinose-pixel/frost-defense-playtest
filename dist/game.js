@@ -1711,8 +1711,8 @@ function updatePresentation(dt) {
     if(q>=1){disposeObject(a.ring);impactRings.splice(i,1);}
   }
   updateWallConnections();
-  const visiblePads=buildPads.filter(p=>padReady(p)&&!p.built&&!p.constructing&&(introStep>=4||(introStep===2&&p.x===-8&&p.z===8))).sort((a,b)=>distanceToDefense(a.type,a.x,a.z)-distanceToDefense(b.type,b.x,b.z)).slice(0,3);
-  for(const p of buildPads)p.g.visible=visiblePads.includes(p)&&!(contextChoice?.index===p.index&&contextChoice.type!==p.type)&&phase==='day'&&!p.built&&!p.constructing&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<9&&(introStep>=4||(introStep===2&&p.x===-8&&p.z===8));
+  const visiblePads=buildPads.filter(p=>padReady(p)&&!p.built&&!p.constructing&&(introStep>=4||(introStep===2&&p.index===12))).sort((a,b)=>distanceToDefense(a.type,a.x,a.z)-distanceToDefense(b.type,b.x,b.z)).slice(0,3);
+  for(const p of buildPads)p.g.visible=visiblePads.includes(p)&&!(contextChoice?.index===p.index&&contextChoice.type!==p.type)&&phase==='day'&&!p.built&&!p.constructing&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<9&&(introStep>=4||(introStep===2&&p.index===12));
   for(const [k,g] of wallDecorObjs){
     if(!g.userData.gates)continue;
     const [x,,z]=k.split(',').map(Number);
@@ -4104,7 +4104,7 @@ function focusedGroundTag() {
   if (actionFocus) return actionFocus.tag;
   if (introStep < 3)
     return introStep === 2
-      ? buildPads.find((p) => p.type === "turret" && p.x === -8 && p.z === 8)
+      ? buildPads.find((p) => p.index === 12)
           ?.tag
       : null;
   const pad = nearestBuildPad();
@@ -4586,7 +4586,7 @@ function actionCandidates() {
       continue;
     if (
       introStep < 2 ||
-      (introStep === 2 && !(p.type === "turret" && p.x === -8 && p.z === 8))
+      (introStep === 2 && !(p.index === 12))
     )
       continue;
     add(
@@ -6261,7 +6261,7 @@ function equipmentQuote(p,type){
 }
 function equipmentActions(){
   if(phase!=='day'||introStep<2)return [];
-  const p=buildPads.filter(p=>p.type!=='wall'&&!p.constructing&&(introStep!==2||(p.x===-8&&p.z===8))).map(p=>({p,d:distanceToDefense(p.type,p.x,p.z)})).filter(v=>v.d<=1.4).sort((a,b)=>a.d-b.d)[0]?.p;
+  const p=buildPads.filter(p=>p.type!=='wall'&&!p.constructing&&(introStep!==2||p.index===12)).map(p=>({p,d:distanceToDefense(p.type,p.x,p.z)})).filter(v=>v.d<=1.4).sort((a,b)=>a.d-b.d)[0]?.p;
   if(!p)return [];
   const st=defenseState.get(key(p.x,1,p.z));
   const type=contextChoice?.index===p.index&&contextChoice.type||st?.type||p.type;
