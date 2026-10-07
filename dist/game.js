@@ -248,6 +248,7 @@ function saveStageClear() {
   }
 }
 function renderStageSelection() {
+  if(survivalEnabled)return refreshVillageTitle();
   loadJourneys();renderJourneyEntry();
   const wrap = $("stageSelect");
   wrap.innerHTML = "";
@@ -281,6 +282,7 @@ function renderStageSelection() {
       : "進行はこの端末に自動保存されます");
 }
 function chooseResultAction() {
+  if(survivalEnabled)return retryVillage();
   if(journey){const next=stageClear?journeySpec(journey.index+1):journey;$("gameover").classList.add("hidden");startGame(1,next);return;}
   $("gameover").classList.add("hidden");
   if (!stageClear) {
@@ -319,6 +321,7 @@ function stageBlockColor(e) {
   return currentStage === 3 ? 0xdbe8f0 : COLORS.snow;
 }
 function stageSpawnAngle() {
+  if(villageRules){const flank=day>=4&&stagePackIndex%3===2?Math.PI:0;stagePackIndex++;return nextRaid.angle+flank+(Math.random()-.5)*.3;}
   if(journey){const c=journeyConfig(),side=c.biome===1?stagePackIndex%2:day%2;return c.turn*Math.PI/2+side*Math.PI+(Math.sin(stagePackIndex++*7+journey.seed)*.14);}
   const flank = currentStage === 3 && stagePackIndex % 3 === 2 ? Math.PI : 0;
   stagePackIndex++;
@@ -877,140 +880,97 @@ function resourceVisualParts(e) {
 
 
 // ---- audio ----
-let ambientGain = null,
-  musicGain = null,
-  ambientOsc = null,
-  musicTimer = 0,
-  musicNote = 0;
-// audio system — v12, integrated from the deployed v11.
-
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = 1;
-  masterGain.connect(audioCtx.destination);
-  ambientGain = audioCtx.createGain();
-  ambientGain.gain.value = 0.015 * settings.ambience;
-  ambientGain.connect(audioCtx.destination);
-  musicGain = audioCtx.createGain();
-  musicGain.gain.value = settings.ambience;
-  musicGain.connect(audioCtx.destination);
-  ambientOsc = audioCtx.createOscillator();
-  ambientOsc.type = "sine";
-  ambientOsc.frequency.value = 98;
-  ambientOsc.connect(ambientGain);
-  ambientOsc.start();
-  applySettings();
+let ambientGain=null,musicGain=null,ambientOsc=null,musicTimer=0,musicNote=0;
+let audioFinal=null,audioOutput=null,musicDuck=null,noiseBuffer=null,duckUntil=0;
+const audioVoices=new Set(),AUDIO_VOICE_LIMIT=20;
+// Original synthesized sounds only. One final bus, bounded voices, no JS sound timers.
+function initAudio(){
+ if(audioCtx)return;
+ audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+ audioOutput=audioCtx.createGain();audioOutput.gain.value=.72;
+ const limiter=audioFinal=audioCtx.createDynamicsCompressor();
+ limiter.threshold.value=-12;limiter.knee.value=6;limiter.ratio.value=8;limiter.attack.value=.003;limiter.release.value=.18;
+ audioOutput.connect(limiter);limiter.connect(audioCtx.destination);
+ masterGain=audioCtx.createGain();masterGain.connect(audioOutput);
+ ambientGain=audioCtx.createGain();ambientGain.connect(audioOutput);
+ musicGain=audioCtx.createGain();musicDuck=audioCtx.createGain();musicGain.connect(musicDuck);musicDuck.connect(audioOutput);
+ ambientOsc=audioCtx.createOscillator();ambientOsc.type='sine';ambientOsc.frequency.value=98;ambientOsc.connect(ambientGain);ambientOsc.start();
+ noiseBuffer=audioCtx.createBuffer(1,Math.ceil(audioCtx.sampleRate*.3),audioCtx.sampleRate);
+ const data=noiseBuffer.getChannelData(0);let seed=19;
+ for(let i=0;i<data.length;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;data[i]=seed/2147483648-1;}
+ applySettings();
 }
-
-function tone(freq = 440, dur = 0.08, type = "sine", vol = 0.13, slide = 1) {
-  if (!audioCtx) return;
-  const o = audioCtx.createOscillator(),
-    g = audioCtx.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(freq, audioCtx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(
-    Math.max(40, freq * slide),
-    audioCtx.currentTime + dur,
-  );
-  g.gain.setValueAtTime(vol, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-  o.connect(g);
-  g.connect(masterGain);
-  o.start();
-  o.stop(audioCtx.currentTime + dur);
+function stopAudioVoice(v){
+ if(!audioVoices.delete(v))return;
+ try{v.source.stop();}catch{}
+ v.source.disconnect();v.gain.disconnect();v.filter?.disconnect();
 }
-
-function sfx(name) {
-  if (!audioCtx) return;
-  const now = performance.now();
-  if (lastSfx[name] && now - lastSfx[name] < 45) return;
-  lastSfx[name] = now;
-  if(name==='complete'){
-    tone(92,.16,'sine',.16,.55);
-    tone(392,.11,'triangle',.09,1);
-    setTimeout(()=>tone(587,.24,'sine',.09),80);
-    setTimeout(()=>tone(784,.32,'sine',.065),150);
-    return;
-  }
-  if (name === "victory") {
-    [262, 330, 392, 523, 659].forEach((n, i) =>
-      setTimeout(() => tone(n, 0.42, "triangle", 0.12), i * 95),
-    );
-    return;
-  }
-  if (name === "fuel") {
-    tone(196, 0.15, "triangle", 0.08, 1.5);
-    setTimeout(() => tone(392, 0.2, "sine", 0.09), 100);
-    return;
-  }
-  if (name === "pickup") {
-    if (lastSfx.pickupNote && now - lastSfx.pickupNote < 100) return;
-    lastSfx.pickupNote = now;
-    tone(880, 0.055, "sine", 0.04, 1.3);
-  } else if (name === "deliver") {
-    tone(420, 0.08, "triangle", 0.055, 0.7);
-  } else if (name === "wood") {
-    tone(170, 0.06, "square", 0.08, 1.8);
-    tone(280, 0.08, "triangle", 0.06, 1.3);
-  } else if (name === "coal") {
-    tone(110, 0.09, "square", 0.09, 0.72);
-    tone(190, 0.05, "triangle", 0.05, 0.8);
-  } else if (name === "iron") {
-    tone(520, 0.05, "triangle", 0.06, 1.3);
-    tone(780, 0.09, "sine", 0.05, 1.1);
-  } else if (name === "build") {
-    tone(180, 0.09, "square", 0.08, 1.3);
-    setTimeout(() => tone(330, 0.12, "triangle", 0.09, 1.45), 70);
-  } else if (name === "upgrade") {
-    tone(330, 0.08, "triangle", 0.08, 1.3);
-    setTimeout(() => tone(520, 0.1, "triangle", 0.08, 1.25), 70);
-    setTimeout(() => tone(780, 0.14, "sine", 0.07, 1.05), 145);
-  } else if (name === "shoot") tone(760, 0.035, "square", 0.025, 0.72);
-  else if (name === "flame") tone(125, 0.12, "sawtooth", 0.035, 0.55);
-  else if (name === "kill") {
-    const pitch = 1 + Math.min(8, Math.max(0, combo - 1)) * 0.065;
-    tone(220 * pitch, 0.04, "square", 0.055, 1.8);
-    tone(440 * pitch, 0.07, "triangle", 0.04, 1.25);
-  } else if (name === "wave") {
-    tone(105, 0.3, "sawtooth", 0.09, 0.65);
-    setTimeout(() => tone(85, 0.35, "sawtooth", 0.08, 0.55), 160);
-  } else if (name === "base" || name === "capture" || name === "rescue") {
-    tone(392, 0.1, "triangle", 0.08, 1.2);
-    setTimeout(() => tone(587, 0.12, "triangle", 0.08, 1.2), 90);
-    setTimeout(() => tone(784, 0.18, "sine", 0.07, 1.05), 190);
-  } else if (name === "frostBreath") {
-    tone(90, 0.28, "sawtooth", 0.07, 1.8);
-    tone(280, 0.22, "triangle", 0.05, 0.55);
-  } else if (name === "boss") {
-    tone(70, 0.45, "sawtooth", 0.12, 0.55);
-    setTimeout(() => tone(55, 0.55, "square", 0.09, 0.5), 240);
-  }
+function cancelAudioCues(){
+ for(const v of [...audioVoices])stopAudioVoice(v);
+ if(audioCtx&&musicDuck){musicDuck.gain.cancelScheduledValues(audioCtx.currentTime);musicDuck.gain.setValueAtTime(1,audioCtx.currentTime);}
+ duckUntil=0;musicTimer=0;
 }
-
-function updateAmbience(dt) {
-  if (!audioCtx || !ambientGain) return;
-  ambientGain.gain.setTargetAtTime(
-    settings.ambience * (phase === "day" ? 0.012 : 0.007),
-    audioCtx.currentTime,
-    0.8,
-  );
-  musicTimer -= dt;
-  if (musicTimer > 0 || settings.ambience === 0) return;
-  musicTimer = phase === "day" ? 3.2 : 5;
-  const notes = [196, 247, 294, 330, 294, 247];
-  const o = audioCtx.createOscillator(),
-    g = audioCtx.createGain();
-  o.type = "sine";
-  o.frequency.value = notes[musicNote++ % notes.length];
-  g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.018, audioCtx.currentTime + 0.2);
-  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 2.4);
-  o.connect(g);
-  g.connect(musicGain);
-  o.start();
-  o.stop(audioCtx.currentTime + 2.5);
+function audioLayer({f=440,d=.12,type='sine',v=.08,slide=1,at=0,noise=false,priority=1,bus=null,attack=.004}){
+ if(!audioCtx)return;
+ if(audioVoices.size>=AUDIO_VOICE_LIMIT){
+  const victim=[...audioVoices].find(x=>x.priority<priority);
+  if(!victim)return;
+  stopAudioVoice(victim);
+ }
+ const t=audioCtx.currentTime+at,gain=audioCtx.createGain();let source,filter=null;
+ if(noise){source=audioCtx.createBufferSource();source.buffer=noiseBuffer;filter=audioCtx.createBiquadFilter();filter.type='bandpass';filter.frequency.value=f;filter.Q.value=.65;source.connect(filter);filter.connect(gain);}
+ else{source=audioCtx.createOscillator();source.type=type;source.frequency.setValueAtTime(f,t);source.frequency.exponentialRampToValueAtTime(Math.max(35,f*slide),t+d);source.connect(gain);}
+ gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(Math.max(.0002,v),t+Math.min(attack,d*.25));gain.gain.exponentialRampToValueAtTime(.0001,t+d);
+ gain.connect(bus||masterGain);
+ const voice={source,gain,filter,priority};audioVoices.add(voice);
+ source.onended=()=>stopAudioVoice(voice);source.start(t);source.stop(t+d+.015);
+}
+function tone(freq=440,dur=.08,type='sine',vol=.13,slide=1){audioLayer({f:freq,d:dur,type,v:vol,slide});}
+function duckMusic(seconds){
+ if(!audioCtx||!musicDuck)return;
+ const now=audioCtx.currentTime;duckUntil=Math.max(duckUntil,now+seconds);
+ musicDuck.gain.cancelScheduledValues(now);musicDuck.gain.setTargetAtTime(.28,now,.035);musicDuck.gain.setTargetAtTime(1,duckUntil,.28);
+}
+function sfx(name){
+ if(!audioCtx)return;
+ const now=audioCtx.currentTime*1000;
+ const gap={axeSwing:100,axeHit:85,gunShot:100,gunHit:75,kill:90,pickup:100}[name]||45;
+ if(lastSfx[name]!=null&&now-lastSfx[name]<gap)return;
+ lastSfx[name]=now;
+ const layer=(f,d,v,type='sine',slide=1,at=0,priority=1)=>audioLayer({f,d,v,type,slide,at,priority});
+ const noise=(f,d,v,at=0,priority=1)=>audioLayer({f,d,v,at,noise:true,priority});
+ if(name==='axeSwing'){noise(650,.13,.085);layer(180,.11,.035,'triangle',.55);}
+ else if(name==='axeHit'){layer(110,.13,.13,'sine',.45);noise(1250,.065,.12,.008);layer(310,.18,.035,'triangle',.72,.025);}
+ else if(name==='gunShot'){noise(2300,.065,.18);layer(95,.1,.1,'triangle',.45);noise(850,.055,.035,.07);duckMusic(.12);}
+ else if(name==='gunHit'){noise(1700,.055,.075);layer(410,.085,.05,'triangle',.52,.008);}
+ else if(name==='complete'){
+  duckMusic(.7);layer(82,.24,.16,'sine',.52,0,2);noise(520,.13,.10,.015,2);
+  layer(440,.45,.075,'triangle',1,.11,2);layer(660,.55,.045,'sine',1,.18,2);
+ }else if(name==='defended'||name==='victory'){
+  duckMusic(1.8);layer(130,.25,.085,'sine',.65,0,2);
+  for(const [i,f]of [262,330,392,523].entries())layer(f,.65,.065,'triangle',1,.16+i*.065,2);
+  layer(196,1,.06,'sine',1,.18,2);layer(784,.75,.025,'sine',1,.48,2);
+ }else if(name==='kill'){layer(165,.12,.075,'triangle',.55);noise(950,.07,.045,.02);}
+ else if(name==='wood'){layer(170,.07,.075,'triangle',.65);noise(800,.05,.065);}
+ else if(name==='coal'||name==='iron'){noise(name==='iron'?2300:600,.055,.055);layer(name==='iron'?780:190,.13,.045,'triangle',.8);}
+ else if(name==='shoot'){layer(720,.035,.022,'triangle',.6);}
+ else if(name==='pickup'||name==='deliver'){layer(name==='pickup'?880:420,.075,.035,'sine',1.2);}
+ else if(name==='flame'){noise(230,.15,.035);}
+ else if(name==='wave'||name==='boss'||name==='frostBreath'){duckMusic(.5);layer(90,.38,.075,'triangle',.65);noise(320,.24,.05,.08);}
+ else if(name==='build'){layer(140,.12,.09,'triangle',.65);noise(480,.09,.05,.045);}
+ else{ // Familiar supply/upgrade motif, separate from construction and defense success.
+  layer(name==='fuel'?196:330,.15,.075,'triangle',1);layer(name==='fuel'?392:520,.24,.055,'sine',1,.10);
+ }
+}
+function updateAmbience(dt){
+ if(!audioCtx||!ambientGain)return;
+ ambientGain.gain.setTargetAtTime(settings.ambience*(phase==='day'?.009:.005),audioCtx.currentTime,.8);
+ musicTimer-=dt;if(musicTimer>0||settings.ambience===0)return;
+ musicTimer=phase==='day'?3.2:4.5;
+ const notes=phase==='day'?[196,247,294,330,294,247]:[147,175,196,220];
+ const f=notes[musicNote++%notes.length];
+ audioLayer({f,d:2.5,v:.035,attack:.16,priority:0,bus:musicGain});
+ audioLayer({f:f/2,d:2.7,v:.018,attack:.22,priority:0,bus:musicGain,at:.09});
 }
 
 
@@ -1070,6 +1030,7 @@ function spawnPickupTrail(x, y, z, colorHex, count, target, scale=1) {
 }
 
 function updateParticles(dt) {
+  if(survivalEnabled)updateBattleReward(dt);
   const fp = flamePts.geometry.attributes.position.array,
     fr = fuel / 100;
   flameData.forEach((p, i) => {
@@ -1234,6 +1195,7 @@ function updateDeathEffects(dt) {
   }
 }
 function resetEffects() {
+  cancelAudioCues();
   resetPresentation();
   resetFeedback();
   for (const p of flyPickups) recyclePickup(p);
@@ -1312,8 +1274,9 @@ function updatePlayerFeedback(dt) {
     c.mesh.scale.setScalar(1.3 + Math.sin((cargoBounce / 0.3) * Math.PI) * 0.12);
   }
   harvestSwing = Math.max(0, harvestSwing - dt);
-  harvestTool.visible = baseLevel<4 || phase === "day" || harvestSwing > 0;
-  if (harvestSwing > 0 && !(baseLevel>=4 && phase === "night" && shootCD > 0.25))
+  limbs.armR.rotation.y=survivalEnabled&&phase==='night'&&harvestSwing>0?Math.sin((1-harvestSwing/.24)*Math.PI)*1.5-.6:0;
+  harvestTool.visible = survivalEnabled || baseLevel<4 || phase === "day" || harvestSwing > 0;
+  if (harvestSwing > 0 && !(!survivalEnabled && baseLevel>=4 && phase === "night" && shootCD > 0.25))
     limbs.armR.rotation.x =
       -0.4 - Math.sin((1 - harvestSwing / 0.24) * Math.PI) * 1.5;
 }
@@ -1704,12 +1667,13 @@ function celebrateBuild(p) {
 }
 const fadedBuildingMeshes=new Set();
 function restoreBuildingOcclusion(){
- for(const mesh of fadedBuildingMeshes){const s=mesh.userData.occlusionOriginal;Object.assign(mesh.material,s);delete mesh.userData.occlusionOriginal;}
+ for(const mesh of fadedBuildingMeshes){const s=mesh.userData.occlusionOriginal;Object.assign(mesh.material,s);mesh.material.needsUpdate=true;delete mesh.userData.occlusionOriginal;}
  fadedBuildingMeshes.clear();
 }
 function updateBuildingOcclusion(dt){
- const points=[pPos.clone().add(new THREE.Vector3(0,.8,0)),pPos.clone().add(new THREE.Vector3(0,1.55,0))];
+ const points=[pPos.clone().add(new THREE.Vector3(0,.8,0)),pPos.clone().add(new THREE.Vector3(0,1.9,0))];
  if(phase==='night')points.push(...enemies.filter(enemyTargetable).filter(e=>e.model.g.position.distanceTo(pPos)<playerWeapon().range).sort((a,b)=>a.model.g.position.distanceTo(pPos)-b.model.g.position.distanceTo(pPos)).slice(0,3).map(enemyAimPoint));
+ if(survivalEnabled&&phase==='night'&&harvestTool){player.updateMatrixWorld(true);points.push(harvestTool.getWorldPosition(new THREE.Vector3()));}
  const rays=points.map(p=>({ray:new THREE.Ray(camera.position.clone(),p.clone().sub(camera.position).normalize()),distance:p.distanceTo(camera.position)}));
  const obscuring=new Set(),bounds=new THREE.Box3(),hit=new THREE.Vector3();
  for(const g of [fireGroup,...(campCore?[campCore]:[]),...settlementObjs,...turretObjs.values(),...flameObjs.values(),...warehouseObjs.values(),...wallDecorObjs.values()]){
@@ -1719,15 +1683,16 @@ function updateBuildingOcclusion(dt){
    if(!m.isMesh||!m.visible||!m.geometry||Array.isArray(m.material))return;
    if(!m.geometry.boundingBox)m.geometry.computeBoundingBox();
    bounds.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+   if(survivalEnabled)bounds.expandByScalar(.35);
    if(bounds.max.y<1.3)return;
    if(rays.some(r=>r.ray.intersectBox(bounds,hit)&&hit.distanceTo(camera.position)<r.distance-.35))obscuring.add(m);
   });
  }
- for(const m of obscuring){if(!fadedBuildingMeshes.has(m)){m.userData.occlusionOriginal={opacity:m.material.opacity,transparent:m.material.transparent,depthWrite:m.material.depthWrite};fadedBuildingMeshes.add(m);}}
+ for(const m of obscuring){if(!fadedBuildingMeshes.has(m)){m.userData.occlusionOriginal={opacity:m.material.opacity,transparent:m.material.transparent,depthWrite:m.material.depthWrite};fadedBuildingMeshes.add(m);m.material.needsUpdate=true;}}
  for(const m of fadedBuildingMeshes){
   const original=m.userData.occlusionOriginal,target=obscuring.has(m)?.18:original.opacity;
   m.material.transparent=true;m.material.opacity+=(target-m.material.opacity)*Math.min(1,dt*14);m.material.depthWrite=false;
-  if(!obscuring.has(m)&&Math.abs(m.material.opacity-original.opacity)<.01){Object.assign(m.material,original);delete m.userData.occlusionOriginal;fadedBuildingMeshes.delete(m);}
+  if(!obscuring.has(m)&&Math.abs(m.material.opacity-original.opacity)<.01){Object.assign(m.material,original);m.material.needsUpdate=true;delete m.userData.occlusionOriginal;fadedBuildingMeshes.delete(m);}
  }
 }
 function updatePresentation(dt) {
@@ -1919,6 +1884,13 @@ function addSettlementPiece(kind, x, z) {
 function updateCampVisual(shownDay = day) {
   settlementObjs.forEach((g) => disposeObject(g));
   settlementObjs = [];
+  if(survivalEnabled){
+    const home=shownDay>=4||baseLevel>=3?"hut":"tent";
+    if(shownDay>=2||baseLevel>=2){addSettlementPiece(home,-3.8,3.5);addSettlementPiece(home,3.8,3.5);}
+    if(shownDay>=3||baseLevel>=3)addSettlementPiece("hut",-4.6,-4.5);
+    if(shownDay>=4||baseLevel>=3)addSettlementPiece("hut",4.6,-4.5);
+    refreshBaseVisual();return;
+  }
   if (shownDay >= 2 || baseLevel>=2) {
     addSettlementPiece("tent", -3.8, 3.5);
     addSettlementPiece("tent", 3.8, 3.5);
@@ -2250,7 +2222,7 @@ function requiredBaseLevel(type) {
   return type === "wall" || type === "turret" ? 1 : 2;
 }
 
-function buildPadDefinitions() {
+function buildPadDefinitions(layout = survivalEnabled ? 2 : 0) {
   const defs = [];
   for (const x of [-5, 0, 5])
     for (const z of [-6, 6]) defs.push([x, z, "wall", 15]);
@@ -2270,6 +2242,7 @@ function buildPadDefinitions() {
   );
   for(const x of [-10,-5,0,5,10])for(const z of [-14,14])defs.push([x,z,"wall",15]);
   for(const x of [-14,14])for(const z of [-9,-3,3,9])defs.push([x,z,"wall",15]);
+  if(layout===2){for(let i=10;i<14;i++){defs[i][0]=Math.sign(defs[i][0])*10;defs[i][1]=Math.sign(defs[i][1])*10;}defs[14][0]=-4;defs[14][1]=-11;defs[15][0]=4;defs[15][1]=11;}
   return defs;
 }
 function isReservedBuildArea(x, z) {
@@ -2663,6 +2636,9 @@ function buildPlayer() {
   const stock = box(0.18, 0.18, 0.48, 0x765039);
   const barrel = box(0.12, 0.12, 0.55, 0x9bc6d7);
   barrel.position.z = 0.42;
+  barrel.position.x = -.09;
+  const secondBarrel=box(.12,.12,.55,0x9bc6d7);secondBarrel.position.set(.09,0,.42);
+  rifle.add(secondBarrel);
   rifle.add(stock, barrel);
   muzzle = new THREE.Mesh(
     new THREE.OctahedronGeometry(0.22),
@@ -2790,7 +2766,7 @@ function updatePlayer(dt, t) {
   attackRing.visible = false;
   gatherRing.visible=blockArr.some(b=>["wood","leaf","coal","iron"].includes(b.b.t)&&Math.hypot(b.x-pPos.x,b.z-pPos.z)<1.8);
   shootPose = Math.max(0, shootPose - dt);
-  rifle.visible = phase === "night" && baseLevel>=4;
+  rifle.visible = !survivalEnabled && phase === "night" && baseLevel>=4;
   muzzle.visible = shootPose > 0.11;
   rifle.position.z = 0.35 - (shootPose / 0.2) * 0.12;
   if (ml > 0.08 && shootPose <= 0) player.rotation.y = Math.atan2(wx, wz);
@@ -2833,6 +2809,7 @@ function updatePlayer(dt, t) {
     }
     if (target) {
       const weapon=playerWeapon();shootCD=weapon.interval;
+      if(weapon.kind==='melee'){sweepVillageAxe(target);return;}
       const aim = enemyAimPoint(target);
       player.rotation.y = Math.atan2(aim.x - pPos.x, aim.z - pPos.z);
       player.updateMatrixWorld(true);
@@ -2841,10 +2818,10 @@ function updatePlayer(dt, t) {
       shootPose = 0.2;
       muzzle.visible = baseLevel>=4;
       if(weapon.kind==='axe')harvestSwing=.24;
-      const targets=enemies.filter(enemyTargetable).filter(e=>e.model.g.position.distanceTo(player.position)<weapon.range).sort((a,b)=>a.model.g.position.distanceTo(player.position)-b.model.g.position.distanceTo(player.position));
-      for(let i=0;i<weapon.count;i++){const e=targets[i%targets.length]||target;shootArrow(from.clone(),enemyAimPoint(e).sub(from).normalize(),playerDmg,e,weapon.kind);const a=arrows.at(-1);if(weapon.kind==='axe')a.v.multiplyScalar(.6);}
+      const targets=target.kind==='boss'&&!target.legacyMotion&&dragonExposed(target)?[target]:enemies.filter(enemyTargetable).filter(e=>e.model.g.position.distanceTo(player.position)<weapon.range).sort((a,b)=>a.model.g.position.distanceTo(player.position)-b.model.g.position.distanceTo(player.position));
+      for(let i=0;i<weapon.count;i++){const e=targets[i%targets.length]||target;const origin=from.clone();if(weapon.kind==='bullet')origin.add(new THREE.Vector3(i===0?-.09:.09,0,0).applyQuaternion(player.quaternion));shootArrow(origin,enemyAimPoint(e).sub(origin).normalize(),playerDmg,e,weapon.kind);const a=arrows.at(-1);if(weapon.kind==='axe')a.v.multiplyScalar(.6);}
 
-      sfx("shoot");
+      sfx(weapon.kind==='axe'?'axeSwing':'gunShot');
     }
   }
   if (shootPose > 0) {
@@ -3224,6 +3201,7 @@ function colorizeEnemy(g, kind) {
 }
 
 function chooseEnemyKind() {
+  if(villageRules){const r=Math.random();return day>=4&&r<.2?'thrower':day>=3&&r<.4?'breaker':r<.8?'wolf':'raider';}
   if(journey)return journeyEnemyKind();
   if (day === 7 && waveLeft <= 1) return "boss";
   const r = Math.random();
@@ -3273,7 +3251,7 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
         thrower: 54,
         boss: 1155 + (currentStage - 1) * 200,
       }[kind] || 48,
-    hp = hpBase + day * (kind === "boss" ? 35 : 7);
+    hp = hpBase + (villageRules?Math.min(day,20):day) * (kind === "boss" ? 35 : 7);
   model.g.position.set(x, 0.5, z);
   const bb = box(kind === "boss" ? 1.25 : 0.8, 0.1, 0.05, 0x222222);
   bb.position.y = kind === "boss" ? 3.4 : 2.1;
@@ -3386,9 +3364,11 @@ function updateEnemies(dt, t) {
       enemies.splice(i, 1);
       wood += 4;
       coal += 2;
-      worldPop("木材 +4 · 石炭 +2",g.position.clone().add(new THREE.Vector3(0,2,0)),"#ffe4ac");
+      if(survivalEnabled)queueBattleReward();
+      else {worldPop("木材 +4 · 石炭 +2",g.position.clone().add(new THREE.Vector3(0,2,0)),"#ffe4ac");
       spawnPickupTrail(g.position.x,1.2,g.position.z,0xe3ba79,2,player.position.clone(),enemies.length===0||e.kind==='boss'?2.7:2);
       spawnPickupTrail(g.position.x,1.2,g.position.z,0x8ea4c4,1,player.position.clone(),2);
+      }
       kills++;
       combo++;
       comboT = 2.2;
@@ -3511,7 +3491,8 @@ function updateProjectiles(dt, t) {
             .distanceTo(enemyAimPoint(e)) < (e.kind === "boss" ? 1.25 : 0.8)
         ) {
           damageEnemy(e, a.dmg);
-          if(a.kind==='axe'){spawnVoxelBreakup(a.m.position.x,a.m.position.y,a.m.position.z,0xb7d5df,3);sfx("wood");if(settings.motion)shake=Math.max(shake,.35);}
+          if(a.kind==='axe'){spawnVoxelBreakup(a.m.position.x,a.m.position.y,a.m.position.z,0xb7d5df,3);sfx("axeHit");if(settings.motion)shake=Math.max(shake,.35);}
+          else if(a.kind==='bullet')sfx('gunHit');
           burst(a.m.position.x, a.m.position.y, a.m.position.z, 0xffe08a, 3);
           dead = true;
           break;
@@ -3921,6 +3902,7 @@ function updateHUD() {
   $("day").textContent = day;
   $("stageNumber").textContent = journey?journey.index:currentStage;
   $("stageKind").textContent=journey?"遠征":"STAGE";$("dayTotal").textContent=journey?"/ 3夜":"/ 7日";
+  if(survivalEnabled){$("stageKind").textContent="村";$("stageNumber").textContent="";$("dayTotal").textContent="日目";}
   $("phase").textContent = phase === "day" ? "🌞" : "⚔️";
   $("temp").textContent = temp;
   $("fire").textContent = Math.max(0, fuel | 0);
@@ -4512,6 +4494,7 @@ const RAID_TYPES = {
   boss: ["霜翼竜", "印を炉から離して誘導 → 光る円の外へ"],
 };
 function planRaid() {
+  if(villageRules){const side=(day+1)%4;nextRaid={kind:day<3?'wolf':day%3===0?'siege':'normal',angle:side*Math.PI/2,direction:['東','南','西','北'][side]};nightModifier=nextRaid.kind;return;}
   const pool =
     day < 3 ? ["normal", "wolf"] : ["wolf", "fuel", "armored", "siege"];
   const kind =
@@ -4527,8 +4510,14 @@ function planRaid() {
   const direction =
     day === 1 ? "南西" : ["東", "南", "西", "北"][(day + currentStage) % 4];
   nextRaid = { kind, angle, direction };
+  if(chapterTwoFront())nextRaid=chapterTwoFront();
     if(journey){const c=journeyConfig(),side=(c.turn+(c.biome===1?0:day%2*2))%4;nextRaid={kind:["wolf","siege","armored"][(c.biome+day-1)%3],angle:side*Math.PI/2,direction:["東","南","西","北"][side]+(c.biome===1?'・'+["西","北","東","南"][side]:'')};}
-  nightModifier = journey?nextRaid.kind:kind === "boss" ? "normal" : kind;
+  nightModifier = nextRaid.kind === "boss" ? "normal" : nextRaid.kind;
+}
+function chapterTwoFront(index=0){
+ if(villageRules||journey||currentStage!==2||day<3||day>6)return null;
+ const south=(day+index)%2===1;
+ return {kind:index%2===0?'wolf':'siege',angle:south?Math.PI/2:Math.PI*1.5,direction:south?'南':'北'};
 }
 function initExperience() {
   introStep = journey?4:currentStage === 1 ? 0 : 4;
@@ -4767,7 +4756,7 @@ function updateJourney(dt) {
     sfx("upgrade");
   }
   const first = buildPads.find(
-    (p) => p.type === "turret" && p.x === -8 && p.z === 8,
+    (p) => p.index === 12,
   );
   if (introStep === 2 && first?.built) {
     introStep = 3;
@@ -4789,7 +4778,7 @@ function updateJourney(dt) {
     sub = first?.constructing
       ? "組み立て中。床の外へ出ると完成"
       : "床のそばで指を離し、建築ボタンをタップ";
-    objectiveTarget = { x: -6.3, z: 8 };
+    objectiveTarget = { x: (first?.x ?? -8)+1.7, z: first?.z ?? 8 };
   } else if (introStep === 3) {
     title = "3 / 3　拠点の前へ戻ろう";
     sub = "矢塔と一緒に最初の群れを迎えよう";
@@ -4817,7 +4806,7 @@ function updateJourney(dt) {
     const frontDanger=weakFront||brokenFront||closeEnemy;
     const earlyFuel=fuel<=80 && frontDanger;
     const needFuel=fuel<45 || earlyFuel;
-    title = needFuel ? (coal < 10 ? '石炭不足！ 黒い鉱石を集めよう' : fuel<45 ? '燃料低下！ 炉の左で補給' : '前線が危険！ 先に炉へ補給しよう') : day === 7 ? (activeDragon&&dragonExposed(activeDragon)?'今だ！ 竜へ反撃':'竜を炉から引き離そう') : '拠点を守り抜こう';
+    title = needFuel ? (coal < 10 ? '石炭不足！ 黒い鉱石を集めよう' : fuel<45 ? '燃料低下！ 炉の左で補給' : '前線が危険！ 先に炉へ補給しよう') : !survivalEnabled && day === 7 ? (activeDragon&&dragonExposed(activeDragon)?'今だ！ 竜へ反撃':'竜を炉から引き離そう') : '拠点を守り抜こう';
     sub = needFuel ? '拠点HP0で敗北 / 石炭10で補給' : '射撃は自動。敵の近くへ移動して援護';
     if(frontDanger){
       if(!needFuel)title=brokenFront?`${nextRaid.direction}の防衛が破られた！ 炉を迎撃で守ろう`:'前線が危険！ 拠点に近づく敵を迎撃';
@@ -4998,6 +4987,7 @@ function haptic(ms) {
     navigator.vibrate?.(ms);
 }
 function clearRun() {
+  if(survivalEnabled)return;
   try {
     window.localStorage.removeItem(RUN_KEY);
   } catch {}
@@ -5006,6 +4996,8 @@ function clearRun() {
 function snapshotRun() {
   return {
     version: 2,
+    survival: villageRules,
+    villageLayout: survivalEnabled?2:0,
     frontier:frontierLevel,
     journey:journey?{...journey}:null,
     savedAt: Date.now(),
@@ -5113,6 +5105,7 @@ function snapshotRun() {
   };
 }
 function saveRun() {
+  if(survivalEnabled)return saveVillage();
   if (!runActive || restoring || stageClear || baseHP <= 0 )
     return false;
   try {
@@ -5139,10 +5132,11 @@ function validRun(s) {
     !pos(s.p)
   )
     return false;
+  if(s.villageLayout!=null&&![0,2].includes(s.villageLayout))return false;
   if(s.journey!=null&&!validJourney(s.journey))return false;
   if(s.frontier!=null&&(!Number.isInteger(s.frontier)||s.frontier<0||s.frontier>2))return false;
   if(s.arrows?.some(a=>a.kind!=null&&!['arrow','axe','bullet'].includes(a.kind)))return false;
-  if(s.expedition!=null){const e=s.expedition;if(e.version!==1||typeof e.pilot!=='boolean'||!['untouched','invested','salvaged'].includes(e.facility)||typeof e.engineer!=='boolean'||!Number.isInteger(e.usedNight)||e.usedNight<0||e.usedNight>7||!Number.isInteger(e.paidDay)||e.paidDay<1||e.paidDay>nums.day||(e.work&&(!['invest','salvage','engineer'].includes(e.work.kind)||!finite(e.work.t,0,3))))return false;}
+  if(s.expedition!=null){const e=s.expedition;if(e.version!==1||typeof e.pilot!=='boolean'||!['untouched','invested','salvaged'].includes(e.facility)||typeof e.engineer!=='boolean'||!Number.isInteger(e.usedNight)||e.usedNight<0||e.usedNight>(s.survival?9999:7)||!Number.isInteger(e.paidDay)||e.paidDay<1||e.paidDay>nums.day||(e.work&&(!['invest','salvage','engineer'].includes(e.work.kind)||!finite(e.work.t,0,3))))return false;}
   if(s.defenses && !s.defenses.every(([,v])=>!v.investment||(finite(v.investment.wood,0,100000)&&finite(v.investment.coal,0,100000))))return false;
   if(s.sites && !s.sites.every(v=>!v.investment||(finite(v.investment.wood,0,100000)&&finite(v.investment.coal,0,100000))))return false;
   if(s.strategy!=null && (s.strategy.version!==1 || !Number.isInteger(s.strategy.capacity) || s.strategy.capacity<4 || s.strategy.capacity>8 || typeof s.strategy.legacy!=='boolean'))return false;
@@ -5158,7 +5152,7 @@ function validRun(s) {
   }
   if (s.nightAssault != null) {
     const a=s.nightAssault, modern=a.version===2;
-    const plan=nightAssaultPlan(s.stage, nums.day, !modern);
+    const plan=nightAssaultPlan(s.stage, nums.day, !modern, !!s.survival);
     if(!plan || nums.phase!=='night' || (a.version!=null&&!modern) || !['first','break','second'].includes(a.mode))return false;
     const index=modern?a.index:(a.mode==='second'?1:0);
     if(!Number.isInteger(index)||index<0||index>=plan.groups.length||
@@ -5207,7 +5201,7 @@ function validRun(s) {
   if (
     !Number.isInteger(nums.day) ||
     nums.day < 1 ||
-    nums.day > 7 ||
+    nums.day > (s.survival?9999:7) ||
     !Number.isInteger(nums.baseLevel) ||
     nums.baseLevel < 1 ||
     nums.baseLevel > 5 ||
@@ -5366,6 +5360,10 @@ function validRun(s) {
   return true;
 }
 function readRun() {
+  if(survivalEnabled)return loadVillage()?.live||null;
+  return readLegacyRun();
+}
+function readLegacyRun() {
   try {
     const raw = window.localStorage.getItem(RUN_KEY);
     if (!raw || raw.length > 3000000) return null;
@@ -5376,6 +5374,7 @@ function readRun() {
   }
 }
 function refreshContinue() {
+  if(survivalEnabled)return refreshVillageTitle();
   const s = readRun();
   $("continueBtn").hidden = !s;
   $("continueBtn").textContent = "つづきから";
@@ -5386,17 +5385,21 @@ function refreshContinue() {
   titleSavePreview=s;
 }
 function launchSelectedVillage(){
+  if(survivalEnabled)return startVillage();
   $("newRunConfirm").hidden=true;
   try{initAudio();audioCtx?.resume();}catch(error){console.warn("Audio unavailable",error);}
   $("title").classList.add("hidden");
   startGame(selectedStage);
 }
 function requestNewVillage(){
-  if(readRun()){$("newRunConfirm").hidden=false;$("newRunCancel").focus();return;}
+  if(readRun()||(survivalEnabled&&villageBlocked)){$("newRunConfirm").hidden=false;$("newRunCancel").focus();return;}
   launchSelectedVillage();
 }
-function resumeRun() {
-  const s = readRun();
+function resumeRun(override = null) {
+  if(override?.version!==2)override=null;
+  if(survivalEnabled&&!override){const v=loadVillage();if(v?.status==='defeated'){showVillageDefeat();return false;}}
+  const s = override || readRun();
+  villageRules=!!s?.survival;
   if (!s) {
     refreshContinue();
     $("campaignNote").textContent =
@@ -5583,10 +5586,11 @@ function pauseGame() {
   actionTime = 0;
   actionLatched = true;
   saveRun();
+  cancelAudioCues();
   audioCtx?.suspend();
   $("pausePanel").classList.remove("hidden");
   $("pauseCaption").textContent =
-    `STAGE ${currentStage} · ${day}日目 ${phase === "day" ? "準備中" : "防衛中"}`;
+    survivalEnabled?`${day}日目 · ${phase === "day" ? "昼の準備" : "夜の防衛"} · 集落Lv.${baseLevel}`:`STAGE ${currentStage} · ${day}日目 ${phase === "day" ? "準備中" : "防衛中"}`;
 }
 function unpauseGame() {
   if (!paused) return;
@@ -5603,6 +5607,7 @@ function returnToTitle() {
   running = false;
   runActive = false;
   resetInput();
+  cancelAudioCues();
   audioCtx?.suspend();
   $("pausePanel").classList.add("hidden");
   $("upgrade").classList.add("hidden");
@@ -5691,7 +5696,8 @@ function updateBossFlank(dt) {
   }
   f.wait=-1;
 }
-function nightAssaultPlan(stage = currentStage, night = day, legacy = false) {
+function nightAssaultPlan(stage = currentStage, night = day, legacy = false, village = villageRules) {
+  if(village){const total=villageEnemyCount(night),n=Math.ceil(total/12);const groups=Array.from({length:n},(_,i)=>Math.floor(total/n)+(i<total%n?1:0));return {groups,first:groups[0],reserve:total-groups[0],breakSeconds:7};}
   if (night === 7) return null; // Boss breath/flank timing remains independent.
   if (legacy && !(stage === 1 && night === 5) && !(stage === 2 && night === 4)) return null;
   const total = nightEnemyCountForStage(night, stage);
@@ -5704,19 +5710,20 @@ function nightAssaultPlan(stage = currentStage, night = day, legacy = false) {
 }
 function assaultIndex(a = nightAssault) { return a?.version === 2 ? a.index : a?.mode === 'second' ? 1 : 0; }
 function assaultPlan(a = nightAssault) { return nightAssaultPlan(currentStage, day, a?.version !== 2); }
-function assaultForecast() {
-  const kinds = day < 3 ? (nextRaid.kind==='wolf'?'狼中心':'狼・襲撃者')
-    : nextRaid.kind==='armored'?'鎧中心':nextRaid.kind==='wolf'?'狼中心'
-    : nextRaid.kind==='siege'?'破城中心':day>=4?'鎧・投石・破城':'鎧・破城';
-  return `${nextRaid.direction}${currentStage===3?'＋反対側':''} / ${kinds}`;
+function assaultForecast(index=assaultIndex()) {
+  const raid=index===assaultIndex()?nextRaid:(chapterTwoFront(index)||nextRaid);
+  const kinds = day < 3 ? (raid.kind==='wolf'?'狼中心':'狼・襲撃者')
+    : raid.kind==='armored'?'鎧中心':raid.kind==='wolf'?'狼中心'
+    : raid.kind==='siege'?'破城中心':day>=4?'鎧・投石・破城':'鎧・破城';
+  return `${raid.direction}${currentStage===3||(villageRules&&day>=4)?'＋反対側':''} / ${kinds}`;
 }
 function nextAssaultCaption() {
   const plan=assaultPlan(), index=assaultIndex()+1;
-  return index<plan.groups.length ? `第${index+1}群${plan.groups[index]}体 · ${assaultForecast()}` : `最終群 · ${assaultForecast()}`;
+  return index<plan.groups.length ? `第${index+1}群${plan.groups[index]}体 · ${assaultForecast(index)}` : `最終群 · ${assaultForecast(index)}`;
 }
 
 function beginNightAssault() {
-  bossFlank=currentStage===3 && day===7 ? {reserve:4,wait:-1,bossSpawned:false} : null;
+  bossFlank=!villageRules && currentStage===3 && day===7 ? {reserve:4,wait:-1,bossSpawned:false} : null;
   const plan = nightAssaultPlan();
   nightAssault = plan ? { version: 2, index: 0, mode: 'first', reserve: plan.reserve, remaining: plan.breakSeconds } : null;
 }
@@ -5738,6 +5745,9 @@ function updateNightAssault(dt) {
   if (nightAssault.mode !== 'break' && index < plan.groups.length-1 && waveLeft === nightAssault.reserve && enemies.length === 0) {
     nightAssault.mode = 'break';
     nightAssault.remaining = plan.breakSeconds;
+    // Existing edge/ground cues show the next front during the repair break.
+    const front=chapterTwoFront(index+1);
+    if(front){nextRaid=front;nightModifier=front.kind;}
     showWaveBanner(`第${index+1}群を撃退`, `${nextAssaultCaption()} / ${plan.breakSeconds}秒で補給・修理`);
     sfx('complete'); saveRun();
   } else if (nightAssault.mode === 'break') {
@@ -5776,17 +5786,17 @@ function update(dt, t) {
       spawnT = 0;
       stagePackIndex = 0;
       const nm = RAID_TYPES[nextRaid.kind];
-      sfx(day === 7 ? "boss" : "wave");
+      sfx(!survivalEnabled && day === 7 ? "boss" : "wave");
       showWaveBanner(
-        day === 7 ? "☠️ FINAL NIGHT" : "🌙 NIGHT " + day,
-        day === 7 ? "巨大ボス襲来" : nightAssault ? `${nightAssaultPlan().groups.join('＋')}体 · ${assaultForecast()}${nightAssaultPlan().groups.length>1?' / 群間'+nightAssaultPlan().breakSeconds+'秒整備':''}` : nm[0] + " / " + nm[1],
+        !survivalEnabled && day === 7 ? "☠️ FINAL NIGHT" : "🌙 NIGHT " + day,
+        !survivalEnabled && day === 7 ? "巨大ボス襲来" : nightAssault ? `${nightAssaultPlan().groups.join('＋')}体 · ${assaultForecast()}${nightAssaultPlan().groups.length>1?' / 群間'+nightAssaultPlan().breakSeconds+'秒整備':''}` : nm[0] + " / " + nm[1],
       );
       toast("🌙 第" + day + "夜 — 襲撃開始!");
     }
   } else {
     temp = -25 - (day - 1) * 4;
     fuel -=
-      (0.9 + day * 0.12) *
+      (0.9 + (villageRules?Math.min(day,12):day) * 0.12) *
       fireDrainMul *
       (nightModifier === "fuel" ? 1.7 : 1) *
       dt;
@@ -5801,8 +5811,8 @@ function update(dt, t) {
       }
     }
     if (waveLeft <= 0 && enemies.length === 0 && !upgrading) {
-      if(journey&&day>=3)finishJourney();
-      else if (day >= 7) winGame();
+      if(!survivalEnabled&&journey&&day>=3)finishJourney();
+      else if (!survivalEnabled && day >= 7) winGame();
       else showUpgrade();
       return;
     }
@@ -5828,7 +5838,7 @@ function update(dt, t) {
   updateJourney(dt);
   updateObjective();
   if (baseHP <= 0) gameOver(false);
-  else if (day === 7 && waveLeft === 0 && bossDefeated && (!bossFlank || enemies.length===0)) winGame();
+  else if (!survivalEnabled && day === 7 && waveLeft === 0 && bossDefeated && (!bossFlank || enemies.length===0)) winGame();
 }
 
 function winGame() {
@@ -5865,7 +5875,7 @@ function showUpgradeCards(savedPicks = null) {
   const pool = [
     {
       icon: "attack",
-      name: "自動射撃強化",
+      name: survivalEnabled?"斧の刃を研ぐ":"自動射撃強化",
       desc: "自動攻撃ダメージ +20%",
       apply: () => (playerDmg = Math.round(playerDmg * 1.2)),
     },
@@ -5933,6 +5943,7 @@ function showUpgradeCards(savedPicks = null) {
     bindScreenAction(b, () => {
       if(!upgrading||!activeUpgradePicks)return;
       beginScreenInput();
+      const beforeReward=survivalEnabled?snapshotRun():null;
       u.apply();
         dawnScene = null; $("dawnPanel").hidden=true;
       defenseState.forEach((st, k) => {
@@ -5945,6 +5956,7 @@ function showUpgradeCards(savedPicks = null) {
       nightAssault = null;
       bossFlank = null;
       day++;
+      if(survivalEnabled){villageRules=true;journey=null;}
       phase = "day";
       phaseT = 40;
       activeUpgradePicks = null;
@@ -5958,7 +5970,7 @@ function showUpgradeCards(savedPicks = null) {
       ensureWorkers();
       running = true;
       $("journey").hidden=false;
-      saveRun();
+      if(!saveRun()&&survivalEnabled){resumeRun(beforeReward);return;}
       updateHUD();
       const advice = preparationAdvice();
       showWaveBanner("☀️ DAY " + day, advice.title);
@@ -5974,6 +5986,7 @@ function gameOver(froze) {
   $("combo").hidden = true;
   $("toast").style.opacity = 0;
   if (!running) return;
+  if(survivalEnabled){failVillage();return;}
   endExperience();
   const breached = enemies.some(
     (e) => Math.hypot(e.model.g.position.x, e.model.g.position.z) < 3,
@@ -6026,6 +6039,7 @@ function startGame(stage = currentStage, journeyRun=null) {
   $("resultInsight").textContent = "";
   resourceHudValues.clear();
   resetEffects();
+  resetBattleReward();
   resetConstruction();
   resetStrategy();
   resetBaseVisual();
@@ -6104,7 +6118,7 @@ function startGame(stage = currentStage, journeyRun=null) {
   camera.position.copy(camLook).add(CAM_OFFSET);
   camera.lookAt(camLook);
   if(journey&&!routeAudit().ok)return rejectJourneyTerrain();
-  showWaveBanner(journey?"遠征 "+journey.index:"STAGE " + currentStage, stageConfig().name);
+  showWaveBanner(survivalEnabled?"1日目 · 村のはじまり":journey?"遠征 "+journey.index:"STAGE " + currentStage, survivalEnabled?"集めて、建てて、この灯を守る":stageConfig().name);
   toast(
     journey?journeyObjective():currentStage === 1 ? "モミの木へ歩いてみよう" : "襲撃の方向を見て備えよう",
   );
@@ -6113,7 +6127,7 @@ function startGame(stage = currentStage, journeyRun=null) {
 }
 
 // Introductory nights only. Later waves and all enemy statistics are unchanged.
-function nightEnemyCount(n) { return nightEnemyCountForStage(n, currentStage); }
+function nightEnemyCount(n) { return villageRules?villageEnemyCount(n):nightEnemyCountForStage(n, currentStage); }
 function nightEnemyCountForStage(n, stage) {
   const baseline = n === 1 ? 6 : n === 2 ? 12 : n === 7 ? 22 : 10 + n * 5;
   return baseline + (n >= 3 ? (stage - 1) * 2 : 0);
@@ -6153,7 +6167,7 @@ function updateDawnScene(dt) {
   const q=Math.min(1,Math.max(0,s.t-.35)/(settings.motion?1.45:.45));
   if(s.t>=.35&&!s.revealed){
     s.revealed=true; const old=settlementObjs.length; updateCampVisual(day+1);
-    s.newHomes=settlementObjs.slice(old); sfx("complete");
+    s.newHomes=settlementObjs.slice(old); sfx("defended");
     $("dawnTitle").textContent=settlementObjs.length>old?"守った夜が、暮らしになる。":"この集落で、次の朝を。";
     $("dawnDetail").textContent=settlementObjs.length>old?`住居が ${old} → ${settlementObjs.length}棟へ。次の夜に備えよう`:`${defenseState.size}の設備と灯を守った。強化を選び、傷んだ設備を整えよう`;
   }
@@ -6164,6 +6178,7 @@ function updateDawnScene(dt) {
 }
 function finishDawnScene(){
   if(!dawnScene)return;
+  cancelAudioCues();
   for(const g of dawnScene.newHomes||[])g.scale.setScalar(baseLevel>=4?1.28:1.12);
   dawnScene=null;$("dawnPanel").hidden=true;showUpgradeCards(activeUpgradePicks);
 }
@@ -6428,6 +6443,7 @@ function updateEdgeCues(){
  place('furnaceDirection',{x:fireGroup.position.x,z:fireGroup.position.z,kind:'furnace',distance:30,n:0});
  const groups=threatGroups();
  if(!groups.length&&nextRaid)groups.push({x:Math.cos(nextRaid.angle)*30,z:Math.sin(nextRaid.angle)*30,kind:nextRaid.kind==='boss'?'boss':nextRaid.kind==='wolf'?'wolf':nextRaid.kind==='armored'?'armored':nextRaid.kind==='siege'?'breaker':'raider',n:0,distance:30,forecast:true});
+ if(villageRules&&day>=4&&groups.length===1&&groups[0].forecast){const a=nextRaid.angle+Math.PI;groups.push({x:Math.cos(a)*30,z:Math.sin(a)*30,kind:'thrower',n:0,distance:30,forecast:true});}
  groups.forEach((g,i)=>place(ids[i],g));
  if(bossFlank?.wait>=0&&groups.length<3){const a=nextRaid.angle+Math.PI;place(ids[groups.length],{x:Math.cos(a)*30,z:Math.sin(a)*30,kind:'breaker',n:2,distance:24,forecast:true});}
 }
@@ -6742,6 +6758,7 @@ function updateFurnaceEvolution(){
 }
 
 function evolveDefenseModel(g,type,level){
+  if(survivalEnabled){evolveLowVillageDefense(g,type,level);return;}
   g.scale.multiplyScalar(type==='wall'?1:1.08);
   addUpperDefenseShape(g,type,level);
   const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);};
@@ -6778,8 +6795,8 @@ function evolveDefenseModel(g,type,level){
 // ---- progression ----
 // Growth uses existing camp upgrades. No additional progression menu.
 let frontierLevel=0;
-function playerWeapon(){return baseLevel<4?{kind:'axe',count:baseLevel,range:7.8,interval:.52}:{kind:'bullet',count:baseLevel===5?2:1,range:baseLevel===5?14:12,interval:.34};}
-function weaponCaption(){return baseLevel<4?'斧 ×'+baseLevel:baseLevel===4?'長射程の銃':'二連射の銃';}
+function playerWeapon(){if(survivalEnabled)return {kind:'melee',count:1,range:2.8,interval:.62};return baseLevel<4?{kind:'axe',count:baseLevel,range:7.8,interval:.52}:{kind:'bullet',count:2,range:baseLevel===5?14:12,interval:.34};}
+function weaponCaption(){if(survivalEnabled)return '近接斧・薙ぎ払い';return baseLevel<4?'斧 ×'+baseLevel:baseLevel===4?'二連装の銃':'長射程の二連装銃';}
 function coldAttackInterval(){return fuel<=0?1.25:1;}
 function padUnlocked(p){return p.index<18||baseLevel>=(p.z<0?3:4);}
 function padReady(p){return !!p&&!p.built&&!p.constructing&&padUnlocked(p)&&baseLevel>=requiredBaseLevel(p.type)&&canAfford(getBuildCost(p))&&(p.type==='wall'||equipmentUsed()<equipmentCapacity);}
@@ -6825,7 +6842,7 @@ function addUpperDefenseShape(g,type,level){
  }
 }
 function plantFrontierNode(type,x,z){
- if(isReservedBuildArea(x,z)||blockAt(x,1,z))return false;
+ if(isReservedBuildArea(x,z)||blockAt(x,1,z)||(survivalEnabled&&travelLane(x,z)))return false;
  if(type==='wood'){
   for(let y=1;y<=3;y++)blocks.set(key(x,y,z),{t:'wood',hp:0});
   for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)blocks.set(key(x+dx,4,z+dz),{t:'leaf',hp:0});
@@ -6876,6 +6893,7 @@ function journeyActions(){
 }
 // Every road is kept free of resources on creation and regrowth. Road paint uses this same predicate.
 function travelLane(x,z){
+ if(survivalEnabled&&Math.abs(x)<1.9&&Math.abs(z)>2.5)return true;
  if(Math.abs(x)<1.65&&(Math.abs(z)<8.4||Math.abs(z)>11.6))return true;
  if(Math.abs(x-3)<1.65&&Math.abs(z)>7.2&&Math.abs(z)<12.8)return true;
  if(Math.abs(x)<4.5&&(Math.abs(Math.abs(z)-8)<1.3||Math.abs(Math.abs(z)-12)<1.3))return true;
@@ -6916,6 +6934,191 @@ function routeAudit(){
  const targets=[['炉',-1.8,0],['拠点',1.8,0],['修理',0,-2.5],...stageConfig().outposts];
  const failures=targets.filter(([,x,z])=>!queue.some(([px,pz])=>Math.hypot(px-x,pz-z)<1.6)).map(t=>t[0]);
  return {reachable:queue.length,failures,ok:failures.length===0};
+}
+
+
+// ---- village ----
+// Unpublished village prototype. Legacy run/campaign bytes remain untouched.
+const VILLAGE_KEY='frost-defense-app.village.v1';
+const STAMINA_CAP=6, STAMINA_INTERVAL=4*60*60*1000;
+let survivalEnabled=false, villageRules=false, village=null, villageBlocked=false, villageFailurePending=false;
+const villageClone=value=>JSON.parse(JSON.stringify(value));
+function staminaAt(s,now=Date.now()){
+  // A backwards wall clock cannot grant energy or move the anchor backwards.
+  const time=Math.max(s.anchor,now),units=Math.floor((time-s.anchor)/STAMINA_INTERVAL);
+  const energy=Math.min(STAMINA_CAP,s.energy+units);
+  return {energy,anchor:energy===STAMINA_CAP?time:s.anchor+units*STAMINA_INTERVAL};
+}
+function validVillage(v){
+  const integer=(n,max)=>Number.isSafeInteger(n)&&n>=0&&n<=max;
+  return v?.version===1&&['active','defeated'].includes(v.status)&&validRun(v.live)&&validRun(v.dawn)&&
+    ['dawn','import'].includes(v.checkpoint)&&v.dawn.state.day<=v.live.state.day&&
+    integer(v.stamina?.energy,STAMINA_CAP)&&integer(v.stamina?.anchor,8640000000000000)&&
+    ['bestNight','bestStreak','streak','lastStreak','lastRewardDay'].every(k=>integer(v.records?.[k],9999));
+}
+function writeVillage(next){
+  // One storage assignment contains BOTH spending and the restored world.
+  try {window.localStorage.setItem(VILLAGE_KEY,JSON.stringify(next));village=next;return true;}
+  catch { $('saveStatus').textContent='保存できません。この画面を閉じないでください';return false; }
+}
+function newVillageEnvelope(s,now=Date.now()){
+  return {version:1,status:'active',live:villageClone(s),dawn:villageClone(s),checkpoint:'dawn',
+    stamina:{energy:STAMINA_CAP,anchor:now},records:{bestNight:0,bestStreak:0,streak:0,lastStreak:0,lastRewardDay:0}};
+}
+function loadVillage(){
+  if(village)return village;
+  villageBlocked=false;
+  try{
+    const raw=window.localStorage.getItem(VILLAGE_KEY);
+    if(raw){if(raw.length>6500000)throw Error('size');const parsed=JSON.parse(raw);if(!validVillage(parsed))throw Error('save');const next=migrateVillageLayout(parsed);if(next!==parsed&&!writeVillage(next))throw Error("layout write");village=next;return village;}
+    const legacyRaw=window.localStorage.getItem(RUN_KEY),legacy=readLegacyRun();
+    if(legacyRaw&&!legacy)throw Error('legacy');
+    if(legacy){
+      const migrated=migrateVillageLayout(newVillageEnvelope(legacy));migrated.checkpoint='import';
+      migrated.records.bestNight=legacy.state.phase==='night'?legacy.state.day:Math.max(0,legacy.state.day-1);
+      // Old expedition is retained exactly through its current night; next dawn joins the village.
+      if(!writeVillage(migrated))throw Error('write');return village;
+    }
+  }catch{villageBlocked=true;}
+  return null;
+}
+function saveVillage(){
+  if(!runActive||restoring||stageClear||baseHP<=0||village?.status==='defeated')return false;
+  const s=snapshotRun(),next=village?villageClone(village):newVillageEnvelope(s);
+  next.live=s;
+  if(s.state.phase==='night')next.records.bestNight=Math.max(next.records.bestNight,s.state.day);
+  if(s.state.phase==='day'&&s.state.day>next.dawn.state.day){
+    next.dawn=villageClone(s);next.checkpoint='dawn';
+    if(next.records.lastRewardDay<s.state.day-1){
+      next.records.lastRewardDay=s.state.day-1;next.records.streak++;
+      next.records.bestStreak=Math.max(next.records.bestStreak,next.records.streak);
+    }
+  }
+  const ok=writeVillage(next);if(ok)$('saveStatus').textContent='村を保存済み · この端末';return ok;
+}
+function refreshVillageTitle(){
+  const v=loadVillage(),s=v?.live;
+  $('title').dataset.saved=s?'true':'false';titleSavePreview=s||null;
+  $('continueBtn').hidden=!s;$('continueBtn').textContent=v?.status==='defeated'?'村の復帰を選ぶ':'村のつづきから';
+  $('resumeDetail').hidden=!s;$('resumeDetail').textContent=s?`${s.state.day}日目 · 集落Lv.${s.state.baseLevel} · 最高到達 第${v.records.bestNight}夜`:'';
+  $('startBtn').textContent=s?'別の村をはじめる':'村をはじめる';
+  $('startBtn').disabled=villageBlocked;
+  $('titleChapters').hidden=true;$('journeyStart').hidden=true;
+  $('campaignNote').textContent=v?.checkpoint==='import'?'旧版の村を引き継ぎました。昼開始の記録がないため、最初の復帰先は引継ぎ時点です。次の朝から昼開始へ戻れます。':villageBlocked?'記録を保護するため開始を止めています。旧記録は削除していません。':'同じ村で、次の夜へ。進行はこの端末に自動保存。';
+  $('newRunConfirm').hidden=true;
+}
+function startVillage(){
+  if(villageBlocked)return false;
+  const old=loadVillage();
+  // A confirmed fresh start replaces only the prototype village; the last village remains an archive.
+  const previous=old?villageClone({...old,archive:undefined}):null;
+  village=null;villageRules=true;
+  restoring=true;
+  try{try{initAudio();audioCtx?.resume();}catch{}startGame(1);}finally{restoring=false;}
+  const next=newVillageEnvelope(snapshotRun());
+  if(old){next.stamina=staminaAt(old.stamina);next.records.bestNight=old.records.bestNight;next.records.bestStreak=old.records.bestStreak;next.archive=previous;}
+  if(!writeVillage(next)){village=old;running=false;runActive=false;$('title').classList.remove('hidden');return false;}
+  $('newRunConfirm').hidden=true;return true;
+}
+function failVillage(){
+  if(!village||village.status==='defeated')return;
+  const next=villageClone(village);next.status='defeated';
+  next.records.lastStreak=next.records.streak;next.records.streak=0;
+  next.records.bestNight=Math.max(next.records.bestNight,day);
+  next.loss={day,kills,buildings:defenseState.size};
+  if(!writeVillage(next)){
+    villageFailurePending=true;running=false;resetInput();$('gameover').classList.remove('hidden');$('goTitle').textContent='敗北の記録を保存できません';$('goSub').textContent='保存領域を確認してください';$('goStat').textContent='';$('resultInsight').textContent='再挑戦の消費はありません。画面を閉じず保存を再試行してください。';$('retryBtn').textContent='保存を再試行';return;
+  }
+  villageFailurePending=false;endExperience();running=false;resetInput();cancelAudioCues();showVillageDefeat();
+}
+function showVillageDefeat(){
+  const v=loadVillage();if(!v)return;
+  const s=staminaAt(v.stamina),wait=Math.max(0,STAMINA_INTERVAL-(Date.now()-s.anchor));
+  $('title').classList.add('hidden');$('gameover').classList.remove('hidden');
+  $('goTitle').textContent='灯を守れなかった。村は残っています。';
+  $('goSub').textContent=`第${v.loss?.day||v.live.state.day}夜で防衛終了`;
+  $('goStat').textContent=`今回の連続防衛 ${v.records.lastStreak}夜 · 最高到達 第${v.records.bestNight}夜`;
+  $('resultInsight').textContent=v.checkpoint==='import'?'旧版には昼の記録がないため、最初の復帰は引き継いだ時点です。次の朝から昼開始へ戻れます。':`${v.dawn.state.day}日目の昼開始へ戻り、建物と資材をその時点からやり直せます。`;
+  $('resultSaveNote').textContent=`再挑戦スタミナ ${s.energy}/${STAMINA_CAP} · 通常の再開は消費なし`+(s.energy===0?` · 次の1回まで約${Math.ceil(wait/60000)}分`:'');
+  $('retryBtn').textContent=s.energy>0?(v.checkpoint==='import'?'引継ぎ時点へ · 1消費':'この日の昼へ · 1消費'):'回復状況を確認';
+  $('resultHomeBtn').textContent='村を保存してタイトルへ';
+}
+function retryVillage(){
+  if(villageFailurePending){failVillage();return false;}
+  const v=loadVillage();if(!v||v.status!=='defeated')return false;
+  const next=villageClone(v);next.stamina=staminaAt(next.stamina);
+  if(next.stamina.energy===0){showVillageDefeat();return false;}
+  next.stamina.energy--;next.status='active';next.live=villageClone(next.dawn);
+  if(!writeVillage(next))return false;
+  if(!resumeRun(next.live)){
+    // The committed state is already the restored checkpoint; a reload resumes without another charge.
+    $('campaignNote').textContent='復帰先は保存済みです。画面を開き直し「村のつづきから」で再開できます。';return false;
+  }
+  return true;
+}
+function villageEnemyCount(n){return n===1?6:n===2?10:Math.min(48,10+(n-2)*4);}
+function sweepVillageAxe(target){
+  const facing=Math.atan2(target.model.g.position.x-pPos.x,target.model.g.position.z-pPos.z);
+  player.rotation.y=facing;shootPose=.2;harvestSwing=.24;sfx('axeSwing');
+  let hits=0;
+  for(const e of enemies){
+    if(!enemyTargetable(e))continue;
+    const dx=e.model.g.position.x-pPos.x,dz=e.model.g.position.z-pPos.z,d=Math.hypot(dx,dz);
+    if(d>2.8||d<.001||(dx*Math.sin(facing)+dz*Math.cos(facing))/d<.1)continue;
+    damageEnemy(e,playerDmg*1.7,'melee');hits++;
+    const push=e.kind==='boss'?.12:e.kind==='breaker'?.4:.95;
+    const x=e.model.g.position.x+dx/d*push,z=e.model.g.position.z+dz/d*push;
+    if(!solidAt(x,z)&&Math.max(Math.abs(x),Math.abs(z))<R_INNER){e.model.g.position.x=x;e.model.g.position.z=z;}
+  }
+  if(hits)sfx('axeHit');
+}
+
+// Visual receipts are batched away from melee contact; resources are credited at death.
+let battleReward={wood:0,coal:0,wait:0};
+function resetBattleReward(){battleReward={wood:0,coal:0,wait:0};}
+function queueBattleReward(){battleReward.wood+=4;battleReward.coal+=2;}
+function updateBattleReward(dt){
+ if(!battleReward.wood)return;
+ battleReward.wait+=dt;
+ if(battleReward.wait<1.5||harvestSwing>0||enemies.some(e=>e.hp>0&&e.model.g.position.distanceTo(pPos)<4.5))return;
+ worldPop('木材 +'+battleReward.wood+' · 石炭 +'+battleReward.coal,pPos.clone().add(new THREE.Vector3(0,4.6,0)),'#bbd9d0');
+ resetBattleReward();
+}
+
+function migrateVillageLayout(v){
+ if(v.live.villageLayout===2&&v.dawn.villageLayout===2)return v;
+ const next=villageClone(v);
+ next.layoutBackup ||= {live:villageClone(v.live),dawn:villageClone(v.dawn)};
+ for(const name of ['live','dawn']){
+  const s=next[name];if(s.villageLayout===2)continue;
+  const before=buildPadDefinitions(0),after=buildPadDefinitions(2),moves=new Map();
+  for(let i=0;i<before.length;i++){const[a,b]=before[i],[x,z]=after[i];if(a!==x||b!==z)moves.set(key(a,1,b),key(x,1,z));}
+  s.defenses=s.defenses.map(([k,d])=>[moves.get(k)||k,d]);
+  const terrain=s.blocks.filter(([k,b])=>!['wall','turret','flame','warehouse'].includes(b.t));
+  const structures=s.blocks.filter(([,b])=>['wall','turret','flame','warehouse'].includes(b.t)).map(([k,b])=>[moves.get(k)||k,b]);
+  const occupied=new Set(structures.map(([k])=>k));
+  s.blocks=[...terrain.filter(([k])=>!occupied.has(k)),...structures];s.villageLayout=2;
+ }
+ return next;
+}
+function evolveLowVillageDefense(g,type,level){
+ // Growth reads through materials and braces, not stacked extra storeys.
+ const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);};
+ if(type==='wall'){
+  if(level>=2)add(3.8,.18,.54,0x69818a,0,.72,0);
+  if(level>=3)for(const x of [-1.65,1.65])add(.4,.18,.62,0xdceae5,x,1.72,0);
+  if(level>=4)for(const x of [-1.15,1.15])add(.2,.45,.12,0xd2a65f,x,.88,.3);
+  g.scale.y=.72;
+ }else if(type==='turret'){
+  if(level>=2)for(const x of [-.8,.8])add(.28,1.4,.35,0x6c8a92,x,.75,.7);
+  if(level>=3)add(1.7,.2,.3,0xe4b665,0,1.98,1.1);
+  if(level>=4)for(const x of [-.55,.55])add(.2,.2,1.35,0xdfbb76,x,1.9,1.1);
+  g.scale.y=.7;
+ }else{
+  if(level>=2)add(type==='flame'?1.3:1.8,.18,1.4,0x67858b,0,.65,0);
+  if(level>=3)for(const x of [-.5,.5])add(.18,.38,.12,0xdfb46e,x,1.3,.8);
+  g.scale.y=.75;
+ }
 }
 
 
@@ -6983,6 +7186,7 @@ function boot() {
       if (victoryScene) {
         victoryScene.t = 10;
         updateVictoryScene(0);
+        cancelAudioCues();
       }
     };
     renderStageSelection();
@@ -7029,6 +7233,7 @@ function boot() {
     reportStartupError(error);
   }
 }
+survivalEnabled = $('gameViewport').dataset.mode === 'village';
 boot();
 
 })();

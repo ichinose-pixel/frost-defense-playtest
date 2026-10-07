@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="styles/game.css?v=47" />
   </head>
   <body>
-    <div id="gameViewport">
+    <div id="gameViewport" data-mode="village">
       <div id="playTools" hidden>
         <span class="brandMark">こごえるな！</span
         ><button id="pauseBtn" aria-label="一時停止と設定">Ⅱ</button>
@@ -116,7 +116,7 @@
           <p id="resumeDetail" hidden></p>
           <button class="btn" id="continueBtn" hidden>つづきから</button>
           <button class="btn" id="startBtn">はじめる</button>
-          <section id="newRunConfirm" hidden aria-label="新しい村を始める確認"><p>今の途中記録を置き換えて、<br>新しい村をはじめますか？</p><button id="newRunAccept">新しくはじめる</button><button id="newRunCancel">今の村に戻る</button></section>
+          <section id="newRunConfirm" hidden aria-label="新しい村を始める確認"><p>今の村の建物・資材・進行を離れ、<br>1日目から別の村をはじめます。<br>最高記録とスタミナは引き継ぎます。<br>直前の村は端末内の保管記録に残ります。</p><button id="newRunAccept">新しくはじめる</button><button id="newRunCancel">今の村に戻る</button></section>
           <button id="journeyStart" class="secondaryBtn" hidden></button>
           <details id="titleChapters"><summary>土地を選ぶ・村の記録</summary><div id="stageSelect" aria-label="土地を選ぶ"></div><p id="stageDescription"></p><p id="campaignRecord" hidden></p><figure id="campAlbum" hidden><img id="campPortrait" alt="前に守り抜いた集落"><figcaption id="campAlbumText"></figcaption></figure></details>
           <p id="campaignNote"></p>
