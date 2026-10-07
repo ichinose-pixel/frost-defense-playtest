@@ -34,6 +34,7 @@
         <button id="equipmentUpgrade" type="button" hidden>強化</button>
         <button id="equipmentCancel" type="button">変更せず戻る</button>
       </section>
+      <section id="dailyPanel" hidden role="dialog" aria-modal="true" aria-labelledby="dailyTitle"><h2 id="dailyTitle"></h2><p id="dailyDetail"></p><button id="dailyResume" class="btn" hidden>挑戦のつづき</button><button id="dailyEnter" class="btn">今日の挑戦</button><button id="dailyClose" class="btn">村へ戻る</button></section>
       <section id="actionPanel" hidden>
         <div class="contextHead"><b id="actionTitle"></b><button id="contextExchange" hidden aria-label="設備を交換">↔</button><button id="contextInfo" aria-label="対象の詳細">ⓘ</button><button id="contextClose" hidden aria-label="選択を閉じる">×</button></div><small id="contextPause" hidden>選択中・時間停止　移動で戻る</small><div id="contextOptions" hidden></div><span id="actionCost"></span>
         <div class="dwellTrack" id="actionTrack"><i id="actionFill"></i></div>
@@ -117,6 +118,7 @@
           <button class="btn" id="continueBtn" hidden>つづきから</button>
           <button class="btn" id="startBtn">はじめる</button>
           <section id="newRunConfirm" hidden aria-label="新しい村を始める確認"><p>今の村の建物・資材・進行を離れ、<br>1日目から別の村をはじめます。<br>最高記録とスタミナは引き継ぎます。<br>直前の村は端末内の保管記録に残ります。</p><button id="newRunAccept">新しくはじめる</button><button id="newRunCancel">今の村に戻る</button></section>
+          <button id="dailyStart" class="btn" type="button">今日の挑戦 · 任意</button>
           <button id="journeyStart" class="secondaryBtn" hidden></button>
           <details id="titleChapters"><summary>土地を選ぶ・村の記録</summary><div id="stageSelect" aria-label="土地を選ぶ"></div><p id="stageDescription"></p><p id="campaignRecord" hidden></p><figure id="campAlbum" hidden><img id="campPortrait" alt="前に守り抜いた集落"><figcaption id="campAlbumText"></figcaption></figure></details>
           <p id="campaignNote"></p>

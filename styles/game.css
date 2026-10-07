@@ -1383,7 +1383,7 @@ button:disabled{filter:saturate(.35);opacity:.58}
 #title .btn,#pausePanel .btn{border-radius:5px;background:linear-gradient(#e4c489,#c9a567);color:#183741;box-shadow:0 4px 0 #80633b;border:1px solid #f0d7a6}
 
 /* こごえるな！: the playable world is the title scene, not a wallpaper. */
-#gameViewport[data-screen='title']>:not(#title):not(canvas):not(#runtimeStatus){visibility:hidden!important}
+#gameViewport[data-screen='title']>:not(#title):not(canvas):not(#runtimeStatus):not(#dailyPanel){visibility:hidden!important}
 #title{padding:0 24px max(23px,env(safe-area-inset-bottom));justify-content:flex-end;align-items:center;overflow:hidden;background:linear-gradient(180deg,#09273565,transparent 27%,transparent 57%,#0a293ed9 78%,#092536 100%)}
 #title .titleIdentity{position:absolute;top:max(26px,env(safe-area-inset-top));left:0;width:100%;pointer-events:none;transform:rotate(-5deg)}
 #title .titleTagline{font-size:11px;letter-spacing:.12em;margin:0 0 9px;color:#d7eaf1;font-weight:700}
@@ -1427,3 +1427,12 @@ button:disabled{filter:saturate(.35);opacity:.58}
 #title h1 span{display:inline;font:inherit;letter-spacing:inherit}
 #title h1 .logoWarm{padding:0;margin:0}
 @media(min-aspect-ratio:6/5){#title h1,#title:has(#campAlbum:not([hidden])) h1{font-size:clamp(30px,5.8vw,48px)}}
+
+/* Village work reuses the local action card; keep the world and close button reachable. */
+#contextOptions{max-height:220px;overflow-y:auto;overscroll-behavior:contain}
+
+#dailyPanel{position:absolute;z-index:110;left:50%;top:50%;transform:translate(-50%,-50%);width:min(340px,calc(100% - 32px));max-height:80%;overflow:auto;box-sizing:border-box;padding:22px;background:#173c48;border:2px solid #dcbd7e;border-radius:16px;box-shadow:0 0 0 100vmax #081a26b3}#dailyPanel .btn{display:block;width:100%;margin:12px 0}#dailyPanel[hidden]{display:none}
+
+#contextOptions[data-layout="village"]{display:flex;flex-direction:column;gap:7px;max-height:260px}#contextOptions[data-layout="village"] button{flex:none;min-height:44px;width:100%;text-align:left;white-space:normal;font-size:13px;line-height:1.5}
+
+#contextOptions .serviceOption{display:grid;grid-template-columns:1fr auto;column-gap:10px;row-gap:3px;padding:10px 12px;text-align:left}#contextOptions .serviceOption strong{font-size:17px;line-height:1.2;color:#fff5d9}#contextOptions .serviceEffect{grid-column:1;font-size:11px;font-weight:500;color:#c3dae0;line-height:1.35}#contextOptions .serviceCosts{grid-column:2;grid-row:1 / span 2;display:flex;gap:5px;align-items:center;font-size:13px;font-weight:800}#contextOptions .serviceCosts>span{display:flex;align-items:center;gap:2px}#contextOptions .serviceCosts svg{width:16px;height:17px}

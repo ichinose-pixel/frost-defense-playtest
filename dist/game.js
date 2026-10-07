@@ -282,6 +282,7 @@ function renderStageSelection() {
       : "進行はこの端末に自動保存されます");
 }
 function chooseResultAction() {
+  if(dailyRun)return startDaily(dailySpec(dailyRun.date));
   if(survivalEnabled)return retryVillage();
   if(journey){const next=stageClear?journeySpec(journey.index+1):journey;$("gameover").classList.add("hidden");startGame(1,next);return;}
   $("gameover").classList.add("hidden");
@@ -321,11 +322,11 @@ function stageBlockColor(e) {
   return currentStage === 3 ? 0xdbe8f0 : COLORS.snow;
 }
 function stageSpawnAngle() {
-  if(villageRules){const flank=day>=4&&stagePackIndex%3===2?Math.PI:0;stagePackIndex++;return nextRaid.angle+flank+(Math.random()-.5)*.3;}
+  if(villageRules){const flank=day>=4&&stagePackIndex%3===2?Math.PI:0;stagePackIndex++;return nextRaid.angle+flank+(dailyRandom('combat')-.5)*.3;}
   if(journey){const c=journeyConfig(),side=c.biome===1?stagePackIndex%2:day%2;return c.turn*Math.PI/2+side*Math.PI+(Math.sin(stagePackIndex++*7+journey.seed)*.14);}
   const flank = currentStage === 3 && stagePackIndex % 3 === 2 ? Math.PI : 0;
   stagePackIndex++;
-  return (nextRaid?.angle || 0) + flank + (Math.random() - 0.5) * 0.45;
+  return (nextRaid?.angle || 0) + flank + (dailyRandom('combat') - 0.5) * 0.45;
 }
 
 function beginVictoryScene() {
@@ -462,7 +463,7 @@ function blockAt(x, y, z) {
 
 function buildTerrain() {
   buildRegionTerrain();
-  terrainSeed=journey?.seed||((Date.now()>>>0)||1);
+  terrainSeed=journey?.seed||dailyRun?.seed||((Date.now()>>>0)||1);
   blocks.clear();
   turretObjs.forEach((g) => disposeObject(g));
   turretObjs.clear();
@@ -1889,7 +1890,7 @@ function updateCampVisual(shownDay = day) {
     if(shownDay>=2||baseLevel>=2){addSettlementPiece(home,-3.8,3.5);addSettlementPiece(home,3.8,3.5);}
     if(shownDay>=3||baseLevel>=3)addSettlementPiece("hut",-4.6,-4.5);
     if(shownDay>=4||baseLevel>=3)addSettlementPiece("hut",4.6,-4.5);
-    refreshBaseVisual();return;
+    addVillageServiceDetails();refreshBaseVisual();return;
   }
   if (shownDay >= 2 || baseLevel>=2) {
     addSettlementPiece("tent", -3.8, 3.5);
@@ -2548,7 +2549,7 @@ function updateDefenseCombat(dt, t) {
     const [tx, ty, tz] = k.split(",").map(Number),
       st = defenseState.get(k),
       lv = st ? st.level : 1,
-      range = turretRange(lv),
+      range = turretRange(lv)+(villagePrepared("range")?6+villageDepth.levels[1]*.5:0),
       rate = Math.max(0.34, T_RATE - (lv - 1) * 0.12),
       dmg = Math.round(turretDmg * (1 + (lv - 1) * 0.55));
     g._cd = (g._cd || 0) - dt;
@@ -2931,10 +2932,12 @@ function dragonExposed(e) {
     e.breathClock >= dragonBreathInterval(e) - 1.25
   );
 }
-function damageEnemy(e, amount) {
+function damageEnemy(e, amount, source="ranged") {
   if (!enemyTargetable(e)) return false;
   // Armored in flight; descending to breathe is the player's damage window.
   const factor = e.kind === "boss" ? (dragonExposed(e) ? 1.25 : 0.6) : 1;
+  if(villageDepthActive()&&e.kind==='armored'&&source!=='melee'&&!villagePrepared('pierce'))amount*=.18;
+  if(villageDepthActive()&&e.kind==='thrower'&&source==='melee'){e.siegeT=0;if(e.siegeMark){disposeObject(e.siegeMark);e.siegeMark=null;}}
   e.hp -= amount * factor;
   if(e.kind==='boss')e.hitFlash=.12;
   return true;
@@ -3201,10 +3204,11 @@ function colorizeEnemy(g, kind) {
 }
 
 function chooseEnemyKind() {
-  if(villageRules){const r=Math.random();return day>=4&&r<.2?'thrower':day>=3&&r<.4?'breaker':r<.8?'wolf':'raider';}
+  if(villageDepthActive())return villageDepthEnemyKind();
+  if(villageRules){const r=dailyRandom('combat');return day>=4&&r<.2?'thrower':day>=3&&r<.4?'breaker':r<.8?'wolf':'raider';}
   if(journey)return journeyEnemyKind();
   if (day === 7 && waveLeft <= 1) return "boss";
-  const r = Math.random();
+  const r = dailyRandom('combat');
   if (currentStage >= 2 && day >= 3 && r > 0.82)
     return currentStage === 3 && r > 0.91 ? "breaker" : "armored";
   if (nightModifier === "wolf" && r < 0.78) return "wolf";
@@ -3217,7 +3221,7 @@ function chooseEnemyKind() {
 }
 
 function spawnEnemy(x = null, z = null, kindOverride = null) {
-  const a = Math.random() * Math.PI * 2,
+  const a = dailyRandom('combat') * Math.PI * 2,
     r = R_INNER - 1.2;
   if (x === null || z === null) {
     x = Math.round(Math.cos(a) * r);
@@ -3240,6 +3244,8 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
           : makeRaider(scale);
   if (kind !== "boss") {
     colorizeEnemy(model.g, kind);
+    if(villageDepthActive()&&kind==='armored')addVoxelDetails(model.g,[[.16,.95,.9,0x607e91,.42,1,0],[.19,.12,.95,0xc5d7df,.44,1.35,0]]);
+    if(villageDepthActive()&&kind==='thrower')addVoxelDetails(model.g,[[.5,.45,.5,0x84929a,.45,1.5,0],[.16,.9,.15,0x674c3d,.36,1.15,.3]]);
     model.g.scale.multiplyScalar(1.38);
   }
   const hpBase =
@@ -3286,8 +3292,8 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
     targetOutpost =
       kind !== "boss" &&
       ops.length &&
-      Math.random() < (currentStage === 3 ? 0.52 : 0.42)
-        ? ops[Math.floor(Math.random() * ops.length)]
+      dailyRandom('combat') < (currentStage === 3 ? 0.52 : 0.42)
+        ? ops[Math.floor(dailyRandom('combat') * ops.length)]
         : null;
   enemies.push({
     kind,
@@ -3298,7 +3304,7 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
     dmg,
     atkT: 0,
     bar: bf,
-    walkT: Math.random() * 6,
+    walkT: dailyRandom('combat') * 6,
     targetOutpost,
   });
   if (kind === "boss") announceDragon(enemies.at(-1));
@@ -3321,10 +3327,10 @@ function spawnEnemyPack() {
     pack =
       day === 7 && waveLeft <= 1
         ? 1
-        : Math.min(5, 2 + Math.floor(day / 2) + (Math.random() < 0.6 ? 1 : 0));
+        : Math.min(5, 2 + Math.floor(day / 2) + (dailyRandom('combat') < 0.6 ? 1 : 0));
   for (let i = 0; i < pack && i < allowance && waveLeft > 0; i++) {
-    const ox = (Math.random() * 2 - 1) * 1.5,
-      oz = (Math.random() * 2 - 1) * 1.5;
+    const ox = (dailyRandom('combat') * 2 - 1) * 1.5,
+      oz = (dailyRandom('combat') * 2 - 1) * 1.5;
     spawnEnemy(Math.round(baseX + ox), Math.round(baseZ + oz), null);
     waveLeft--;
   }
@@ -3362,8 +3368,9 @@ function updateEnemies(dt, t) {
       if (e.kind === "boss") bossDefeated = true;
       spawnDeathEffect(e);
       enemies.splice(i, 1);
-      wood += 4;
-      coal += 2;
+      if(e.siegeMark)disposeObject(e.siegeMark);
+      wood += villageDepthActive()?1:4;
+      coal += villageDepthActive()?0:2;
       if(survivalEnabled)queueBattleReward();
       else {worldPop("木材 +4 · 石炭 +2",g.position.clone().add(new THREE.Vector3(0,2,0)),"#ffe4ac");
       spawnPickupTrail(g.position.x,1.2,g.position.z,0xe3ba79,2,player.position.clone(),enemies.length===0||e.kind==='boss'?2.7:2);
@@ -3386,6 +3393,7 @@ function updateEnemies(dt, t) {
       updateDragon(e, dt);
       continue;
     }
+    if(updateVillageSiege(e,dt))continue;
     e.walkT += dt * e.sp * 3;
 
     if (
@@ -3642,7 +3650,7 @@ function updateWorkers(dt, t) {
           updateHUD();
         }
         w.target = null;
-        w.workT = 1.3 + Math.random();
+        w.workT = 1.3 + dailyRandom('resource');
       }
     } else {
       const a = t * 0.35 + idx * 1.8,
@@ -3665,8 +3673,9 @@ function countBlocksOfType(types) {
 
 function spawnResourceNode(type) {
   for (let guard = 0; guard < 120; guard++) {
-    const x = ((Math.random() * 2 - 1) * (baseLevel>=4?25:23)) | 0,
-      z = ((Math.random() * 2 - 1) * (baseLevel>=4?25:23)) | 0;
+    const source=villageDepthActive()?({tree:[-19,-10],coal:[19,-9],iron:[0,21]}[type]):null;
+    const x=source?Math.round(source[0]+(dailyRandom('resource')*2-1)*4):((dailyRandom('resource')*2-1)*(baseLevel>=4?25:23))|0,
+      z=source?Math.round(source[1]+(dailyRandom('resource')*2-1)*4):((dailyRandom('resource')*2-1)*(baseLevel>=4?25:23))|0;
     if (Math.max(Math.abs(x), Math.abs(z)) < 7 || isReservedBuildArea(x, z) || regionCollision(x,z))
       continue;
     if (!stageResourceZone(type, x, z)) continue;
@@ -3681,9 +3690,9 @@ function spawnResourceNode(type) {
       blocks.set(key(x, 5, z), { t: "leaf", hp: 0 });
     } else {
       blocks.set(key(x, 1, z), { t: type==='iron'?'iron':'coal', hp: 0 });
-      if (Math.random() < 0.7 && !blockAt(x, 2, z))
+      if (dailyRandom('resource') < 0.7 && !blockAt(x, 2, z))
         blocks.set(key(x, 2, z), { t: type==='iron'?'iron':'coal', hp: 0 });
-      if (Math.random() < 0.35 && !blockAt(x + 1, 1, z))
+      if (dailyRandom('resource') < 0.35 && !blockAt(x + 1, 1, z))
         blocks.set(key(x + 1, 1, z), { t: type==='iron'?'iron':'coal', hp: 0 });
     }
     rebuild();
@@ -3782,8 +3791,8 @@ function spawnRescueSurvivor() {
   if(expedition.pilot)return;
   if (rescueNPC || rescueSpawnedForDay === day || day < 2) return;
   rescueSpawnedForDay = day;
-  const a = Math.random() * Math.PI * 2,
-    r = 16 + Math.random() * 6,
+  const a = dailyRandom('resource') * Math.PI * 2,
+    r = 16 + dailyRandom('resource') * 6,
     g = new THREE.Group(),
     body = box(0.38, 0.54, 0.28, 0x9a5d58);
   body.position.y = 0.9;
@@ -3903,6 +3912,7 @@ function updateHUD() {
   $("stageNumber").textContent = journey?journey.index:currentStage;
   $("stageKind").textContent=journey?"遠征":"STAGE";$("dayTotal").textContent=journey?"/ 3夜":"/ 7日";
   if(survivalEnabled){$("stageKind").textContent="村";$("stageNumber").textContent="";$("dayTotal").textContent="日目";}
+  if(dailyRun){$("stageKind").textContent="日替わり";$("stageNumber").textContent="";}
   $("phase").textContent = phase === "day" ? "🌞" : "⚔️";
   $("temp").textContent = temp;
   $("fire").textContent = Math.max(0, fuel | 0);
@@ -4576,7 +4586,7 @@ function costWords(c) {
   );
 }
 function actionCandidates() {
-  const list = [...journeyActions(),...expeditionActions(),...equipmentActions()];
+  const list = [...villageDepthActions(),...journeyActions(),...expeditionActions(),...equipmentActions()];
   const add = (a, distance, reach) => {
     if (distance <= reach) list.push({ ...a, distance });
   };
@@ -4823,6 +4833,11 @@ function updateJourney(dt) {
   $("gameViewport").setAttribute("data-fuel-warning", phase==='night' && sub.includes('炉への攻撃') ? 'true' : 'false');
   if(phase==='night'&&fuel<=0)title='消火中：防衛射撃が遅い';
   if(journey&&phase==='day')title=(journeyGoal()?"✓ ":"")+journeyObjective();
+  if(villageDepthActive()){
+    title=phase==='day'?villageThreatCaption():enemies.some(e=>e.kind==='thrower')?'投石兵を止めるか、応射で守ろう':villageThreatCaption();
+    if(phase==='day'){sub=villageDepth.job?'仕事を準備済み · 今夜守って完成':'拠点前で修繕・迎撃準備・村の仕事';}
+    else {const e=enemies.filter(e=>e.kind==='thrower'&&e.hp>0).sort((a,b)=>a.model.g.position.distanceTo(pPos)-b.model.g.position.distanceTo(pPos))[0];if(e)objectiveTarget={x:e.model.g.position.x,z:e.model.g.position.z};}
+  }
   $("journeyTitle").textContent = title;
   $("journeySub").textContent = sub;
   if (guideRing) {
@@ -4987,6 +5002,7 @@ function haptic(ms) {
     navigator.vibrate?.(ms);
 }
 function clearRun() {
+  if(dailyRun)return;
   if(survivalEnabled)return;
   try {
     window.localStorage.removeItem(RUN_KEY);
@@ -4996,7 +5012,9 @@ function clearRun() {
 function snapshotRun() {
   return {
     version: 2,
+    daily:dailyRun?villageClone(dailyRun):null,
     survival: villageRules,
+    depth: survivalEnabled&&villageDepth?villageClone(villageDepth):null,
     villageLayout: survivalEnabled?2:0,
     frontier:frontierLevel,
     journey:journey?{...journey}:null,
@@ -5079,6 +5097,7 @@ function snapshotRun() {
     rescue: rescueNPC?.g.position.toArray() || null,
     enemies: enemies.map((e) => ({
       kind: e.kind,
+      siegeT:e.siegeT||0,
       maneuver:e.maneuver||null,maneuverT:e.maneuverT||0,cycles:e.cycles||0,diveFrom:e.diveFrom||null,legacyMotion:!!e.legacyMotion,slowUntil:e.slowUntil||0,
       p: e.model.g.position.toArray(),
       hp: e.hp,
@@ -5105,6 +5124,7 @@ function snapshotRun() {
   };
 }
 function saveRun() {
+  if(dailyRun)return saveDaily();
   if(survivalEnabled)return saveVillage();
   if (!runActive || restoring || stageClear || baseHP <= 0 )
     return false;
@@ -5132,6 +5152,9 @@ function validRun(s) {
     !pos(s.p)
   )
     return false;
+  if(s.daily!=null&&!validDailyMeta(s.daily))return false;
+  if(s.enemies?.some(e=>e.siegeT!=null&&(!Number.isFinite(e.siegeT)||e.siegeT<0||e.siegeT>4.1)))return false;
+  if(s.depth!=null&&!validVillageDepth(s.depth))return false;
   if(s.villageLayout!=null&&![0,2].includes(s.villageLayout))return false;
   if(s.journey!=null&&!validJourney(s.journey))return false;
   if(s.frontier!=null&&(!Number.isInteger(s.frontier)||s.frontier<0||s.frontier>2))return false;
@@ -5360,6 +5383,7 @@ function validRun(s) {
   return true;
 }
 function readRun() {
+  if(dailyRun)return readDaily()?.run||null;
   if(survivalEnabled)return loadVillage()?.live||null;
   return readLegacyRun();
 }
@@ -5412,7 +5436,12 @@ function resumeRun(override = null) {
     const cleared = campaign.cleared;
     campaign.cleared = Math.max(cleared, s.stage - 1);
     startGame(s.stage,s.journey||null);
+    // World initialization uses new-run presentation; discard it before the restored frame paints.
+    $("waveBanner").classList.remove("show");
+    $("waveBanner").innerHTML="";
     campaign.cleared = cleared;
+    villageDepth=survivalEnabled?(s.depth?villageClone(s.depth):newVillageDepth(Math.max(7,s.state.day+1))):null;
+    if(survivalEnabled&&!s.depth&&s.state.day>=7)villageDepth.graceUntil=s.state.day+3;
     ({
       wood,
       coal,
@@ -5502,6 +5531,7 @@ function resumeRun(override = null) {
       spawnEnemy(v.p[0], v.p[2], v.kind);
       const e = enemies.at(-1);
       Object.assign(e, {
+        siegeT:v.siegeT||0,
         hp: v.hp,
         max: v.max,
         sp: v.sp,
@@ -5601,6 +5631,7 @@ function unpauseGame() {
   audioCtx?.resume();
 }
 function returnToTitle() {
+  clearSiegeMarks();
   dawnScene=null; $("dawnPanel").hidden=true;
   saveRun();
   paused = false;
@@ -5619,6 +5650,7 @@ function returnToTitle() {
   $("playTools").hidden = true;
   $("waypoint").hidden = true;
   if (guideRing) guideRing.visible = false;
+  if(dailyRun){dailyRun=null;survivalEnabled=true;villageRules=!!village?.live.survival;villageDepth=null;}
   refreshContinue();
   renderStageSelection();
 }
@@ -5711,6 +5743,7 @@ function nightAssaultPlan(stage = currentStage, night = day, legacy = false, vil
 function assaultIndex(a = nightAssault) { return a?.version === 2 ? a.index : a?.mode === 'second' ? 1 : 0; }
 function assaultPlan(a = nightAssault) { return nightAssaultPlan(currentStage, day, a?.version !== 2); }
 function assaultForecast(index=assaultIndex()) {
+  if(villageDepthActive())return nextRaid.direction+'＋反対側 · '+villageThreatCaption();
   const raid=index===assaultIndex()?nextRaid:(chapterTwoFront(index)||nextRaid);
   const kinds = day < 3 ? (raid.kind==='wolf'?'狼中心':'狼・襲撃者')
     : raid.kind==='armored'?'鎧中心':raid.kind==='wolf'?'狼中心'
@@ -5842,6 +5875,7 @@ function update(dt, t) {
 }
 
 function winGame() {
+  if(dailyRun){endDaily(true);return;}
   if (stageClear || !running) return;
   stageClear = true;
   running = false;
@@ -5931,6 +5965,7 @@ function showUpgradeCards(savedPicks = null) {
     {icon:"supply",name:"遠征の輸送路",desc:"確保した資源拠点が夜も生産 / 守る範囲が広がる",apply:()=>{campPlan="supply";}},
     {icon:"fort",name:"本陣の迎撃指示",desc:"矢塔は射程内の破城兵・投擲兵を優先 / 狼への射撃は後回し",apply:()=>{campPlan="guard";}}
   );
+  villageDepthRewards(pool);
   const indices = savedPicks || chooseCampRewards();
   activeUpgradePicks = indices;
   const picks = indices.map((i) => pool[i]),
@@ -5949,13 +5984,14 @@ function showUpgradeCards(savedPicks = null) {
       defenseState.forEach((st, k) => {
         const [x, y, z] = k.split(",").map(Number),
           blk = blockAt(x, y, z);
-        if (blk) blk.hp = st.hp = st.maxHp = getDefenseMaxHp(st.type, st.level);
+        if(blk){st.maxHp=getDefenseMaxHp(st.type,st.level);st.hp=villageDepthActive()?Math.min(st.maxHp,st.hp+Math.ceil(st.maxHp*.25)):st.maxHp;blk.hp=st.hp;}
         refreshDefenseVisual(x, y, z);
       });
       $("upgrade").classList.add("hidden");
       nightAssault = null;
       bossFlank = null;
       day++;
+      settleVillageWork();
       if(survivalEnabled){villageRules=true;journey=null;}
       phase = "day";
       phaseT = 40;
@@ -5983,6 +6019,7 @@ function showUpgradeCards(savedPicks = null) {
 }
 
 function gameOver(froze) {
+  if(dailyRun){endDaily(false);return;}
   $("combo").hidden = true;
   $("toast").style.opacity = 0;
   if (!running) return;
@@ -6035,6 +6072,7 @@ function startGame(stage = currentStage, journeyRun=null) {
   $("upgrade").classList.add("hidden");
   $("resultSaveNote").textContent = "";
   resetInput();
+  clearSiegeMarks();
   resetDragon();
   $("resultInsight").textContent = "";
   resourceHudValues.clear();
@@ -6042,6 +6080,7 @@ function startGame(stage = currentStage, journeyRun=null) {
   resetBattleReward();
   resetConstruction();
   resetStrategy();
+  villageDepth=survivalEnabled?newVillageDepth(7):null;
   resetBaseVisual();
   comboT = 0;
   shootCD = 0;
@@ -6138,6 +6177,8 @@ function nightEnemyCountForStage(n, stage) {
 // Bounded camp growth, remote-post awareness and one active expedition/guard plan.
 let campPlan = "none", dawnScene = null, trackedOutpost = null, outpostNotice = null;
 function chooseCampRewards() {
+  if(dailyRun){const offset=(dailyRun.seed+day*3)%7;return [offset,(offset+2)%7,(offset+4)%7];}
+  if(villageDepthActive())return [0,1,2];
   const ordinary = [0,1,2,3,4,5,6].sort(()=>Math.random()-.5);
   return currentStage >= 2 && day === 2 ? [7,8,ordinary[0]] : ordinary.slice(0,3);
 }
@@ -6171,6 +6212,7 @@ function updateDawnScene(dt) {
     $("dawnTitle").textContent=settlementObjs.length>old?"守った夜が、暮らしになる。":"この集落で、次の朝を。";
     $("dawnDetail").textContent=settlementObjs.length>old?`住居が ${old} → ${settlementObjs.length}棟へ。次の夜に備えよう`:`${defenseState.size}の設備と灯を守った。強化を選び、傷んだ設備を整えよう`;
   }
+  if(villageDepthActive()&&villageDepth.job)$("dawnDetail").textContent=['工房','見張り小屋','備蓄小屋'][villageDepth.job.track]+'の増築を守った · 次の朝に完成';
   nightK=s.night*(1-q);sun.intensity=1.3-nightK*1.02;hemi.intensity=1.1-nightK*.72;
   if(settings.motion){camera.position.lerpVectors(s.from,baseLevel>=3?new THREE.Vector3(20,29,33):new THREE.Vector3(12,20,23),q*q*(3-2*q));camera.lookAt(s.look.x*(1-q),0,s.look.z*(1-q));for(const g of s.newHomes||[])g.scale.setScalar((baseLevel>=4?1.28:1.12)*(.2+.8*q));}
   updateParticles(dt);
@@ -6319,10 +6361,11 @@ function updateSupport(dt){
   for(const [k,g] of warehouseObjs){
     const st=defenseState.get(k);if(!st)continue;
     st.supportT=(st.supportT||0)-dt;if(st.supportT>0)continue;st.supportT=2;
-    const [x,,z]=k.split(',').map(Number),heal=8+st.level*5;let helped=false;
+    const [x,,z]=k.split(',').map(Number);let heal=8+st.level*5,helped=false;
+    if(villageDepthActive()){if(villageDepth.parts<=0)continue;heal=Math.min(heal,villageDepth.parts);}
     for(const [other,v] of defenseState){const [ox,,oz]=other.split(',').map(Number);if(Math.hypot(x-ox,z-oz)>9)continue;
-      if(v.hp<v.maxHp||v.frost>0){v.hp=Math.min(v.maxHp,v.hp+heal);v.frost=Math.max(0,(v.frost||0)-3);const b=blocks.get(other);if(b)b.hp=v.hp;helped=true;}}
-    if(Math.hypot(x,z)<=11&&baseHP<baseMax){baseHP=Math.min(baseMax,baseHP+heal);helped=true;}
+      if(v.hp<v.maxHp||v.frost>0){const used=Math.min(heal,v.maxHp-v.hp);v.hp=Math.min(v.maxHp,v.hp+heal);if(villageDepthActive()){villageDepth.parts=Math.max(0,villageDepth.parts-used);heal=Math.min(heal,villageDepth.parts);}v.frost=Math.max(0,(v.frost||0)-3);const b=blocks.get(other);if(b)b.hp=v.hp;helped=true;}}
+    if(Math.hypot(x,z)<=11&&baseHP<baseMax){const used=Math.min(heal,baseMax-baseHP);baseHP=Math.min(baseMax,baseHP+heal);if(villageDepthActive())villageDepth.parts=Math.max(0,villageDepth.parts-used);helped=true;}
     if(helped){spawnPickupTrail(x,1.5,z,0xffcf78,2,new THREE.Vector3(0,1,0),1.4);burst(x,1.7,z,0xffcf78,3);}
   }
 }
@@ -6551,6 +6594,7 @@ function contextCurrent(){const all=actionCandidates();return all.find(a=>a.id==
 function executeContext(quote){
   if(!running||paused||document.hidden||contextLost||joyId!==null||movementRequested()||Date.now()-contextLastCommit<350)return false;
   const a=contextCurrent();if(!a||contextQuote(a)!==quote||a.available===false||!canAfford(a.cost))return false;
+  if(a.id.startsWith('village:service')){beginContextChoice('village');return true;}
   if(!a.apply())return false;
   contextLastCommit=Date.now();cancelContext();actionTime=0;defenseActionConsumed=true;
   haptic(20);saveRun();actionFocus=contextCurrent();updateContextUI();return true;
@@ -6605,11 +6649,13 @@ function optionButton(parent,label,disabled,quote,apply){
 function renderContextOptions(a,p){
   const box=$('contextOptions'),mode=contextChoice?.mode;
   const st=p&&defenseState.get(key(p.x,1,p.z));
-  const sig=[a.id,mode,p?.type,st?.type,st?.level,baseLevel,equipmentUsed(),wood,coal,expedition.route].join('|');
+  const sig=[a.id,mode,p?.type,st?.type,st?.level,baseLevel,equipmentUsed(),wood,coal,iron,expedition.route,JSON.stringify(villageDepth),contextChoice?.workMenu,villageRepairCost().wood].join('|');
   const show=!!mode;
   box.hidden=!show;if(!show)return;
   if(box._signature===sig)return;box._signature=sig;for(const child of [...box.children])child.remove();
+  box.dataset.layout='';
   if(mode==='info')return;
+  if(mode==='village'){renderVillageWorkOptions(box);return;}
   if(p){
     for(const [type,e] of Object.entries(EQUIPMENT)){
       if(st?.type===type)continue;
@@ -6662,16 +6708,18 @@ function updateContextUI(){
   const panel=$('actionPanel');panel.hidden=!running||paused||!a;
   $('defenseChoices').hidden=true;$('actionTrack').hidden=true;
   if(panel.hidden){if(contextPreview)contextPreview.visible=false;return;}
+  if(a.id.startsWith('village:service')&&!contextChoice){contextChoice={id:a.id,mode:'village',automatic:true};contextChoosing=false;}
   const p=contextPad(),st=p&&defenseState.get(key(p.x,1,p.z));
   $('actionTitle').textContent=contextChoice?.mode==='exchange'?typeName(st.type)+' Lv.'+st.level+'を交換':a.title;
   $('actionCost').textContent=contextInspectId&&!actionReady(a)?blockedReason(a):contextChoice?.mode==='info'?a.effect:!canAfford(a.cost)?'資材不足 · '+costWords(a.cost):a.id.startsWith('engineer:')?a.effect:'';
   $('actionCost').hidden=!$('actionCost').textContent;
   $('actionHelp').hidden=true;
-  const button=$('confirmDefense');button.hidden=contextChoice?.mode==='exchange';
+  const button=$('confirmDefense');button.hidden=['exchange','village'].includes(contextChoice?.mode);
   button.textContent=(a.button||a.title)+' · '+costWords(a.cost);
   button.disabled=a.available===false||!canAfford(a.cost)||!!p?.constructing;
   $('contextExchange').hidden=!st||phase!=='day';
-  $('contextClose').hidden=!contextChoice&&!contextInspectId;
+  $('contextClose').hidden=contextChoice?.automatic||(!contextChoice&&!contextInspectId);
+  $('contextInfo').hidden=a.id.startsWith('village:service');
   $('contextPause').hidden=!contextChoosing;
   $('contextInfo').textContent=p&&!st?'⇄':'ⓘ';
   $('contextInfo').setAttribute('aria-label',p&&!st?'施設の種類を選ぶ':'設備の詳細');
@@ -6715,7 +6763,7 @@ function bindContextControls(){
   bindFreshPress($('siteInspect'),()=>JSON.stringify(blockedNearby()?.id),()=>{const a=blockedNearby();if(a){contextInspectId=a.id;contextChoosing=true;updateContextUI();}});
   bindFreshPress($('confirmDefense'),()=>contextQuote(contextCurrent()),executeContext);
   bindFreshPress($('contextExchange'),()=>contextQuote(contextCurrent()),()=>beginContextChoice('exchange'));
-  bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id==='expedition:sawmill'?'expedition':contextPad()&&!contextPad().built?'type':'info'));
+  bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id.startsWith('village:service')?'village':actionFocus?.id==='expedition:sawmill'?'expedition':contextPad()&&!contextPad().built?'type':'info'));
   bindFreshPress($('contextClose'),()=>contextQuote(contextCurrent()),()=>{cancelContext();updateDwell(0);});
 }
 
@@ -7076,12 +7124,12 @@ function sweepVillageAxe(target){
 // Visual receipts are batched away from melee contact; resources are credited at death.
 let battleReward={wood:0,coal:0,wait:0};
 function resetBattleReward(){battleReward={wood:0,coal:0,wait:0};}
-function queueBattleReward(){battleReward.wood+=4;battleReward.coal+=2;}
+function queueBattleReward(){battleReward.wood+=villageDepthActive()?1:4;battleReward.coal+=villageDepthActive()?0:2;}
 function updateBattleReward(dt){
  if(!battleReward.wood)return;
  battleReward.wait+=dt;
  if(battleReward.wait<1.5||harvestSwing>0||enemies.some(e=>e.hp>0&&e.model.g.position.distanceTo(pPos)<4.5))return;
- worldPop('木材 +'+battleReward.wood+' · 石炭 +'+battleReward.coal,pPos.clone().add(new THREE.Vector3(0,4.6,0)),'#bbd9d0');
+ worldPop('木材 +'+battleReward.wood+(battleReward.coal?' · 石炭 +'+battleReward.coal:''),pPos.clone().add(new THREE.Vector3(0,4.6,0)),'#bbd9d0');
  resetBattleReward();
 }
 
@@ -7119,6 +7167,205 @@ function evolveLowVillageDefense(g,type,level){
   if(level>=3)for(const x of [-.5,.5])add(.18,.38,.12,0xdfb46e,x,1.3,.8);
   g.scale.y=.75;
  }
+}
+
+
+// ---- village-depth ----
+// Late village play: saved preparation and work, without moving any footprint.
+let villageDepth=null;
+function newVillageDepth(activateDay=7){return {version:1,activateDay,preparedDay:0,preparation:'none',parts:0,graceUntil:0,levels:[0,0,0],completed:0,job:null,lastCompletedDay:0};}
+function validVillageDepth(v){
+ const int=(x,max)=>Number.isInteger(x)&&x>=0&&x<=max;
+ return v?.version===1&&int(v.graceUntil??0,10000)&&int(v.activateDay,10000)&&int(v.preparedDay,9999)&&['none','range','pierce','repair'].includes(v.preparation)&&Number.isFinite(v.parts)&&v.parts>=0&&v.parts<=1000&&Array.isArray(v.levels)&&v.levels.length===3&&v.levels.every(x=>int(x,3))&&int(v.completed,9999)&&int(v.lastCompletedDay,9999)&&(v.job===null||(int(v.job.track,2)&&int(v.job.day,9999)));
+}
+function villageDepthActive(){return !!(survivalEnabled&&villageRules&&villageDepth&&day>=villageDepth.activateDay);}
+function villagePrepared(kind){return villageDepthActive()&&villageDepth.preparedDay===day&&villageDepth.preparation===kind;}
+function villageThreat(){return ['siege','armor','flank'][(day-7+30000)%3];}
+function villageThreatCaption(){return {siege:'投石兵は後方から設備を狙う · 接近で止める',armor:'装甲兵は矢を防ぐ · 斧か貫通の備え',flank:'逆側の群れに備える · 投石兵も来る'}[villageThreat()];}
+function villageDepthEnemyKind(){
+ // A bounded role roster, not an ever-growing crowd. Each group has a siege threat.
+ const plan=nightAssaultPlan(),remaining=nightSpawnAllowance(),group=plan.groups[assaultIndex()]||12;
+ const index=group-remaining;
+ if(day<=(villageDepth.graceUntil||0)){if(assaultIndex()===0&&index===0)return 'thrower';return index%4===0?'breaker':'wolf';}
+ if(index===0||(day>=14&&index===Math.floor(group/2)))return 'thrower';
+ if(villageThreat()==='armor'||(day>=21&&index%3===1))return index%3===0?'breaker':'armored';
+ return villageThreat()==='flank'?(index%4===0?'breaker':'wolf'):(index%3===0?'armored':'raider');
+}
+function villageRepairCost(){
+ let missing=0,metal=0;for(const s of defenseState.values()){const d=Math.max(0,s.maxHp-s.hp);missing+=d;if(s.type!=='wall')metal+=d;}
+ return {wood:Math.ceil(missing/15),coal:0,iron:Math.ceil(metal/120)};
+}
+function villageWorkChoices(){
+ if(!villageDepthActive())return [];
+ const repair=villageRepairCost(),v=villageDepth,ready=v.preparedDay!==day;
+ const rows=[{id:'mend',label:'設備を修繕',cost:repair,available:repair.wood>0,apply:()=>{for(const[k,s]of defenseState){s.hp=s.maxHp;const b=blocks.get(k);if(b)b.hp=s.hp;}}},
+ {id:'range',label:'今夜の長射程 · 投石兵へ応射',cost:{wood:35,coal:16,iron:4},available:ready,apply:()=>{v.preparedDay=day;v.preparation='range';}},
+ {id:'pierce',label:'今夜の貫通矢 · 装甲に対抗',cost:{wood:30,coal:12,iron:6},available:ready,apply:()=>{v.preparedDay=day;v.preparation='pierce';}},
+ {id:'repair',label:'修理材を補充 · 倉庫の自動修理',cost:{wood:35,coal:8,iron:2},available:ready&&v.parts<1000,apply:()=>{v.preparedDay=day;v.preparation='repair';v.parts=Math.min(1000,v.parts+240+v.levels[0]*80);}}];
+ const names=['工房を増築 · 整備材＋80','見張り小屋を増築 · 準備射程＋0.5','備蓄小屋を増築 · 準備の石炭－2'];
+ for(let track=0;track<3;track++)rows.push({id:'job'+track,label:names[track]+' · '+(v.levels[track]+1)+'/3',cost:{wood:60+v.levels[track]*10,coal:18,iron:6},available:!v.job&&v.levels[track]<3,apply:()=>{v.job={track,day};}});
+ for(const row of rows)if(['range','pierce','repair'].includes(row.id))row.cost.coal=Math.max(2,row.cost.coal-v.levels[2]*2);
+ return rows;
+}
+function commitVillageWork(id){
+ if(!villageDepthActive()||phase!=='day'||!running||paused||!villageServiceNear(villageWorkSite(id)))return false;
+ const c=villageWorkChoices().find(x=>x.id===id);if(!c?.available||!canAfford(c.cost))return false;
+ const before=snapshotRun();wood-=c.cost.wood||0;coal-=c.cost.coal||0;iron-=c.cost.iron||0;c.apply();
+ if(!saveRun()){resumeRun(before);return false;}
+ updateCampVisual();sfx('build');cancelContext();updateDwell(0);return true;
+}
+function villageWorkSite(id){return id==='range'||id==='pierce'||id==='job1'?1:id==='job2'?2:0;}
+function villageServicePoint(track){const g=settlementObjs[track];return g?{x:g.position.x,z:g.position.z+1.9}:null;}
+function villageServiceNear(track){const p=villageServicePoint(track);return !!p&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<1.55;}
+function villageDepthActions(){
+ if(!villageDepthActive()||phase!=='day')return [];
+ return [0,1,2].filter(villageServiceNear).map(track=>{const p=villageServicePoint(track),lv=villageDepth.levels[track],busy=villageDepth.job?.track===track;
+ return {id:'village:service'+track,title:['工房','見張り小屋','備蓄小屋'][track]+' · '+(busy?'増築中 · 夜を守る':lv===3?'増築完了':lv+'/3'),button:'設備を整える',cost:{},effect:['修理材で倉庫の自動修理を支える','今夜の矢を選ぶ','迎撃資材の石炭を節約する'][track],...p,distance:Math.hypot(pPos.x-p.x,pPos.z-p.z),manual:true,apply:()=>false,tag:baseGroundTag};});
+}
+function renderVillageWorkOptions(box){
+ box.dataset.layout='village';const track=Number(contextChoice.id.slice(-1));
+ const quote=()=>contextQuote(contextCurrent())+JSON.stringify(villageDepth)+wood+coal+iron;
+ for(const c of villageWorkChoices().filter(c=>villageWorkSite(c.id)===track&&(!c.id.startsWith('job')||villageDepth.levels[track]<3))){
+  if(c.id==='mend'&&!c.available)continue;
+  const b=optionButton(box,c.label+' · '+costWords(c.cost),!c.available||!canAfford(c.cost),quote,()=>commitVillageWork(c.id));
+  const titles={mend:'設備を修繕',range:'長射程の矢',pierce:'貫通の矢',repair:'修理材を補充',job0:'工房を増築',job1:'見張り小屋を増築',job2:'備蓄小屋を増築'};
+  const effects={mend:'傷んだ設備を全回復',range:'今夜、投石兵へ応射',pierce:'今夜、装甲を貫く',repair:'倉庫の自動修理を支える',job0:'整備材＋80',job1:'準備射程＋0.5',job2:'準備の石炭－2'};
+  b.className='serviceOption';b.setAttribute('aria-label',c.label+' · '+costWords(c.cost));b.textContent='';
+  const title=document.createElement('strong');title.textContent=titles[c.id];b.appendChild(title);
+  const effect=document.createElement('span');effect.className='serviceEffect';effect.textContent=effects[c.id]+(c.id.startsWith('job')?' · '+(villageDepth.levels[track]+1)+'/3':'');b.appendChild(effect);
+  const costs=document.createElement('span');costs.className='serviceCosts';
+  for(const [kind,color,shape,name]of [['wood','#bd965b','M3 5 14 2 19 15 8 18Z','木材'],['coal','#648195','M3 11 7 3 15 4 19 12 14 18 6 17Z','石炭'],['iron','#adc5cc','M2 13 7 5 16 5 20 13 16 17 6 17Z','鉄']])if(c.cost[kind]){const cost=document.createElement('span');cost.innerHTML='<svg viewBox="0 0 22 20" aria-hidden="true"><path d="'+shape+'" fill="'+color+'" stroke="#e4e4cd" stroke-width="1.3"/></svg>'+c.cost[kind];cost.setAttribute('aria-label',name+' '+c.cost[kind]);costs.appendChild(cost);}
+  b.appendChild(costs);
+ }
+}
+
+function settleVillageWork(){
+ const v=villageDepth;if(!v||!v.job||v.job.day>=day||v.lastCompletedDay>=v.job.day)return;
+ const track=v.job.track;v.levels[track]=Math.min(3,v.levels[track]+1);v.completed++;v.lastCompletedDay=v.job.day;v.job=null;
+ // Each developed service affects a choice, never all weapons' permanent damage.
+ if(track===0)v.parts=Math.min(1000,v.parts+120);
+ if(track===1)iron+=8;
+ if(track===2){wood+=30;coal+=15;}
+}
+function villageDepthRewards(pool){
+ if(!villageDepthActive())return;
+ pool.splice(0,3,
+ {icon:'supply',name:'建築用の木材',desc:'木材 +35 · 修繕か増築へ',apply:()=>wood+=35},
+ {icon:'supply',name:'迎撃用の資材',desc:'石炭 +12 / 鉄 +6 · 今夜の備えへ',apply:()=>{coal+=12;iron+=6;}},
+ {icon:'repair',name:'補給所の修繕材',desc:'修繕材 +120 · 補給所が損傷時に使用',apply:()=>villageDepth.parts=Math.min(1000,villageDepth.parts+120)});
+}
+function updateVillageSiege(e,dt){
+ if(!villageDepthActive()||e.kind!=='thrower')return false;
+ const p=e.model.g.position;let target=null,distance=Infinity;
+ for(const[k,s]of defenseState){if(s.type==='wall')continue;const[x,,z]=k.split(',').map(Number),d=Math.hypot(x-p.x,z-p.z);if(d<distance){target={k,x,z,s};distance=d;}}
+ if(!target){target={x:0,z:0};distance=Math.hypot(p.x,p.z);}
+ if(distance>22)return false;
+ // Throwers hold beyond ordinary tower range. A visible windup can be interrupted by melee.
+ e.siegeT=(e.siegeT||0)+dt;
+ e.model.g.rotation.y=Math.atan2(target.x-p.x,target.z-p.z)-Math.PI/2;
+ if(e.siegeT>=2&&!e.siegeMark){e.siegeMark=makeRing(1.4,0xff845d,.7);e.siegeMark.position.set(target.x,.65,target.z);scene.add(e.siegeMark);sfx('wave');}
+ if(e.siegeMark)e.siegeMark.scale.setScalar(1+Math.sin(e.siegeT*7)*.1);
+ if(e.siegeT>=4){e.siegeT=0;if(e.siegeMark){disposeObject(e.siegeMark);e.siegeMark=null;}
+  if(target.s){target.s.hp-=32;target.s.frost=6;const b=blocks.get(target.k);if(b)b.hp=target.s.hp;if(target.s.hp<=0)removeBlock(target.x,1,target.z);}
+  else baseHP-=24;
+  impactPulse(target.x,target.z,0xff845d,2);sfx('axeHit');
+ }
+ e.bar.scale.x=Math.max(.01,e.hp/e.max);return true;
+}
+function clearSiegeMarks(){for(const e of enemies)if(e.siegeMark){disposeObject(e.siegeMark);e.siegeMark=null;}}
+
+function addVillageServiceDetails(){
+ if(!villageDepth||day<villageDepth.activateDay)return;
+ for(let i=0;i<3;i++){
+  const g=settlementObjs[i],lv=villageDepth.levels[i];if(!g)continue;
+  g.userData.service=['工房','見張り小屋','備蓄小屋'][i];
+  const add=(w,h,d,c,x,y,z)=>{const m=box(w,h,d,c);m.position.set(x,y,z);g.add(m);return m;};
+  const color=[0xba693e,0x407c9d,0x688657][i];
+  // Distinct low roof and work face, contained in the existing home footprint.
+  add(1.8,.15,1.65,color,0,1.86,0);
+  if(i===0){
+   add(.5,.45,.4,0x424e57,-.4,.95,.59);add(.65,.12,.42,0x9eacaa,-.4,1.22,.59);
+   if(lv){add(.46,.9+lv*.14,.45,0x765849,.52,2.0,-.4);add(.32,.16,.3,0xffad53,.52,2.53+lv*.14,-.4);}
+   if(lv>=2){add(1.62,.45,1.44,0xb88759,0,2.08,0);add(1.82,.17,1.65,0xba693e,0,2.38,0);for(const x of [-.58,0,.58])add(.16,.08,1.68,0xe0b873,x,2.51,0);}
+   if(lv>=3){add(.36,.5,.38,0xe5ba75,.55,.94,.57);add(.2,.24,.07,0xffd58d,0,1.25,.81);}
+  }else if(i===1){
+   add(.1,.7,.1,0xb39a70,.55,2.18,-.4);const flag=add(.46,.3,.06,0xe9bb5d,.35,2.42,-.4);g.userData.serviceMoving=flag;
+   if(lv){add(1.65,.17,1.45,0xd3b681,0,2.12,0);for(const x of [-.69,.69])add(.13,.55+lv*.1,.13,0x537888,x,2.4,0);add(1.8,.16,1.55,color,0,2.7+lv*.1,0);}
+   if(lv>=2)add(1.45,.32,.12,0xc9ac70,0,2.4,.64);
+   if(lv>=3)add(.7,.18,.25,0xddd5ad,0,2.67,.6);
+  }else{
+   for(let n=0;n<=lv;n++){const x=n%2? .42:-.42,y=.88+Math.floor(n/2)*.45;add(.63,.4,.46,0xbc915c,x,y,.55);add(.08,.42,.48,0x72523c,x,y,.55);}
+   if(lv>=2)add(1.7,.15,.75,color,0,1.6,.4);
+   if(lv>=3){add(1.45,.34,.65,0xc6ab72,0,2.05,0);add(1.55,.1,.75,0x789c69,0,2.27,0);}
+  }
+  if(villageDepth.job?.track===i){for(const x of [-.75,.75])add(.09,1.75,.09,0xd7bd85,x,1.5,.69);for(const y of [1,1.6,2.2])add(1.6,.08,.08,0xd7bd85,0,y,.69);}
+ }
+}
+function updateVillageServiceMotion(){
+ for(const g of settlementObjs){const flag=g.userData.serviceMoving;if(flag)flag.rotation.y=settings.motion?Math.sin(gameElapsed*2)*.22:0;}
+}
+
+
+// ---- daily-challenge ----
+// Optional campaign challenge. This key never contains or writes the village run.
+const DAILY_KEY='frost-defense-app.daily.v1';
+let dailyRun=null;
+function dailySpec(date=new Date().toISOString().slice(0,10)){
+ const stamp=Date.parse(date+'T00:00:00Z');if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(stamp)||new Date(stamp).toISOString().slice(0,10)!==date)return null;
+ const n=Math.floor(stamp/86400000);return {version:1,date,stage:1+n%3,seed:((Math.imul(n,2654435761)^0x715ea)>>>0)||1,random:{combat:0,resource:0},status:'active'};
+}
+function validDailyMeta(m){const fixed=m&&dailySpec(m.date);return !!fixed&&m.version===1&&m.stage===fixed.stage&&m.seed===fixed.seed&&['active','won','lost'].includes(m.status)&&m.random&&['combat','resource'].every(k=>Number.isSafeInteger(m.random[k])&&m.random[k]>=0&&m.random[k]<1e9);}
+function readDaily(){
+ try{const raw=window.localStorage.getItem(DAILY_KEY);if(!raw)return null;if(raw.length>4000000)return null;const d=JSON.parse(raw);if(d.version!==1||!validDailyMeta(d.meta)||!Array.isArray(d.records)||d.records.length>30||!d.records.every(r=>dailySpec(r.date)&&Number.isInteger(r.kills)&&r.kills>=0&&Number.isFinite(r.seconds)&&r.seconds>=0))return null;
+ if(d.meta.status==='active'&&(!validRun(d.run)||d.run.stage!==d.meta.stage||!validDailyMeta(d.run.daily)||d.run.daily.date!==d.meta.date||d.run.daily.status!=='active'))return null;return d;}catch{return null;}
+}
+function dailyRandom(stream){
+ if(!dailyRun)return Math.random();
+ let x=(dailyRun.seed+Math.imul(++dailyRun.random[stream],0x6d2b79f5)+(stream==='combat'?0:0x125aba))>>>0;
+ x=Math.imul(x^(x>>>15),x|1);x^=x+Math.imul(x^(x>>>7),x|61);return ((x^(x>>>14))>>>0)/4294967296;
+}
+function writeDaily(status='active'){
+ if(!dailyRun||restoring)return false;
+ const old=readDaily(),meta={...villageClone(dailyRun),status},records=old?.records||[];
+ if(status==='won'&&!records.some(r=>r.date===meta.date))records.push({date:meta.date,kills,seconds:gameElapsed});
+ const next={version:1,meta,run:status==='active'?snapshotRun():null,records:records.slice(-30)};
+ try{window.localStorage.setItem(DAILY_KEY,JSON.stringify(next));dailyRun.status=status;$('saveStatus').textContent='日替わりを保存済み · 村の進行はそのまま';return true;}
+ catch{$('saveStatus').textContent='挑戦を保存できません。画面を閉じず再試行してください';return false;}
+}
+function saveDaily(){if(!dailyRun||dailyRun.status!=='active'||!runActive||baseHP<=0||stageClear)return false;return writeDaily();}
+function openDailyMenu(){
+ const today=dailySpec(),saved=readDaily();$('dailyPanel').hidden=false;
+ $('dailyTitle').textContent='今日の挑戦 · '+STAGES[today.stage-1].name;
+ const refresh=new Date(Date.parse(today.date+'T00:00:00Z')+86400000);
+ $('dailyDetail').textContent='7夜を守ろう。村の進行はそのまま。次の更新 '+refresh.toLocaleString(undefined,{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); 
+ $('dailyEnter').textContent=saved?'今日の挑戦をやり直す':'今日の挑戦をはじめる';
+ $('dailyResume').hidden=saved?.meta.status!=='active';$('dailyResume').textContent=saved?.meta.status==='active'?saved.meta.date+'の挑戦 · '+saved.run.state.day+'日目から':'挑戦のつづき';
+ $('dailyEnter').disabled=!!window.localStorage.getItem(DAILY_KEY)&&!saved;
+ if($('dailyEnter').disabled)$('dailyDetail').textContent='挑戦記録を読み込めません。記録を保護しています。村の進行はそのまま遊べます。';
+}
+function startDaily(meta=dailySpec()){
+ if(!validDailyMeta(meta))return false;
+ dailyRun=villageClone(meta);dailyRun.status='active';dailyRun.random={combat:0,resource:0};survivalEnabled=false;villageRules=false;
+ const cleared=campaign.cleared;campaign.cleared=Math.max(cleared,meta.stage-1);restoring=true;
+ try{startGame(meta.stage);}finally{campaign.cleared=cleared;restoring=false;}
+ $('dailyPanel').hidden=true;const ok=writeDaily();if(!ok){running=false;returnToTitle();return false;}return true;
+}
+function resumeDaily(){
+ const d=readDaily();if(d?.meta.status!=='active')return false;
+ dailyRun=villageClone(d.meta);survivalEnabled=false;villageRules=false;$('dailyPanel').hidden=true;
+ const ok=resumeRun(d.run);if(ok)dailyRun=villageClone(d.run.daily);return ok;
+}
+function endDaily(won){
+ const saved=writeDaily(won?'won':'lost');running=false;runActive=false;stageClear=won;resetInput();clearSiegeMarks();
+ $('gameover').classList.remove('hidden');$('goTitle').textContent=won?'今日の土地を守った！':'この土地に、もう一度。';
+ $('goSub').textContent=dailyRun.date+' · '+STAGES[dailyRun.stage-1].name;
+ $('goStat').textContent='守った夜 '+(won?7:Math.max(0,day-1))+' · 撃破 '+kills;
+ $('resultInsight').textContent='本編の村はそのまま。同じ条件で再挑戦できます。';
+ $('resultSaveNote').textContent=saved?'日替わり記録を保存済み':'挑戦結果を保存できませんでした';$('retryBtn').textContent='同じ条件で再挑戦';$('resultHomeBtn').textContent='村のタイトルへ';
+}
+function bindDailyUI(){
+ $('dailyStart').onclick=openDailyMenu;$('dailyClose').onclick=()=>{$('dailyPanel').hidden=true;};
+ $('dailyEnter').onclick=()=>startDaily();$('dailyResume').onclick=resumeDaily;
 }
 
 
@@ -7166,7 +7413,7 @@ function frame() {
     uiTime = 0;
     updateHUD();
     updateWorldLabels();
-    updateCampLifeUI();
+    updateCampLifeUI();updateVillageServiceMotion();
     layoutBottomMessages();
   }
   projectGroundTags(t);
@@ -7180,6 +7427,7 @@ function boot() {
   try {
     loadCampaignProgress();
     bindSessionUI();
+    bindDailyUI();
     bindScreenAction($("dawnSkip"),finishDawnScene,()=>!!dawnScene&&dawnScene.t>.45);
     $("outpostCard").onclick = () => {if(expedition.pilot)return;const type=$("outpostCard").dataset.type;trackedOutpost=trackedOutpost===type?null:type;};
     $("victorySkip").onclick = () => {
