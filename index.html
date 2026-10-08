@@ -16,11 +16,11 @@
         ><button id="pauseBtn" aria-label="一時停止と設定">Ⅱ</button>
       </div>
       <section id="introCard" hidden><span id="introNumber"></span><b id="introTitle"></b><p id="introHelp"></p></section>
-      <section id="journey" hidden aria-live="polite">
+      <div id="tacticsForecast" hidden></div><section id="journey" hidden aria-live="polite">
         <b id="journeyTitle"></b><span id="journeySub"></span>
       </section>
       <div id="waypoint" hidden aria-hidden="true">◆</div>
-      <div id="furnaceDirection" class="edgeCue" hidden></div><div id="raidDirection" class="edgeCue raid" hidden></div><div id="flankDirection" class="edgeCue raid" hidden></div><div id="thirdThreat" hidden></div><div id="gestureGuide" hidden aria-hidden="true"><i></i></div>
+      <div id="furnaceDirection" class="edgeCue" hidden></div><div id="raidDirection" class="edgeCue raid" hidden></div><div id="flankDirection" class="edgeCue raid" hidden></div><div id="fourthThreat" hidden></div><div id="thirdThreat" hidden></div><div id="gestureGuide" hidden aria-hidden="true"><i></i></div>
       <div id="repairStation" class="station" hidden>修理 · 木材30</div>
       <div id="fuelStation" class="station" hidden>石炭 → 炉</div>
       <div id="baseStation" class="station" hidden>集落を強化</div>
@@ -36,11 +36,11 @@
       </section>
       <section id="dailyPanel" hidden role="dialog" aria-modal="true" aria-labelledby="dailyTitle"><h2 id="dailyTitle"></h2><p id="dailyDetail"></p><button id="dailyResume" class="btn" hidden>挑戦のつづき</button><button id="dailyEnter" class="btn">今日の挑戦</button><button id="dailyClose" class="btn">村へ戻る</button></section>
       <section id="actionPanel" hidden>
-        <div class="contextHead"><b id="actionTitle"></b><button id="contextExchange" hidden aria-label="設備を交換">↔</button><button id="contextInfo" aria-label="対象の詳細">ⓘ</button><button id="contextClose" hidden aria-label="選択を閉じる">×</button></div><small id="contextPause" hidden>選択中・時間停止　移動で戻る</small><div id="contextOptions" hidden></div><span id="actionCost"></span>
+        <div class="contextHead"><b id="actionTitle"></b><button id="contextExchange" hidden aria-label="設備を交換">↔</button><button id="contextInfo" aria-label="対象の詳細">ⓘ</button><button id="contextClose" hidden aria-label="選択を閉じる">×</button></div><small id="contextPause" hidden>選択中・時間停止　移動で戻る</small><div id="campSwitch" hidden><button id="selectFurnace" type="button">炉・燃料</button><button id="selectCamp" type="button">拠点・耐久</button></div><span id="actionCost"></span>
         <div class="dwellTrack" id="actionTrack"><i id="actionFill"></i></div>
         <small id="actionHelp"></small>
         <div id="defenseChoices" hidden aria-label="強化する対象"></div>
-        <button id="confirmDefense" hidden type="button">強化する</button>
+        <button id="confirmDefense" hidden type="button">強化する</button><div id="contextBody"><div id="contextOptions" hidden></div></div>
       </section>
       <button id="siteInspect" type="button" hidden aria-label="近くの施設の条件を見る">⌕ 条件</button><nav id="routeChoices" hidden aria-label="遠征先へ案内"></nav><small id="engineerCharge" hidden></small>
       <button id="outpostCard" hidden><b id="outpostTitle"></b><span id="outpostDetail"></span><small id="outpostRoute"></small></button>

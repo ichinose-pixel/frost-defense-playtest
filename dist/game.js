@@ -322,6 +322,7 @@ function stageBlockColor(e) {
   return currentStage === 3 ? 0xdbe8f0 : COLORS.snow;
 }
 function stageSpawnAngle() {
+  if(villageTacticsActive()){const angles=villageAttackAngles(),a=angles[stagePackIndex++%angles.length];return a+(dailyRandom('combat')-.5)*.18;}
   if(villageRules){const flank=day>=4&&stagePackIndex%3===2?Math.PI:0;stagePackIndex++;return nextRaid.angle+flank+(dailyRandom('combat')-.5)*.3;}
   if(journey){const c=journeyConfig(),side=c.biome===1?stagePackIndex%2:day%2;return c.turn*Math.PI/2+side*Math.PI+(Math.sin(stagePackIndex++*7+journey.seed)*.14);}
   const flank = currentStage === 3 && stagePackIndex % 3 === 2 ? Math.PI : 0;
@@ -1775,9 +1776,9 @@ function baseUpgradeCost() {
 
 function baseLevelName() {
   return baseLevel === 1
-    ? "焚き火"
+    ? "拠点"
     : baseLevel === 2
-      ? "炉付きキャンプ"
+      ? "補強拠点"
       : baseLevel === 3
         ? "防衛集落"
         : baseLevel === 4
@@ -2196,6 +2197,7 @@ function chooseNightModifier() {
 
 
 // ---- buildings ----
+function defenseUpgradeLimit(){return Math.min(MAX_DEF_LV,survivalEnabled?baseLevel:baseLevel+1);}
 // buildings system — v12, integrated from the deployed v11.
 
 function isGateWall(x,z){return x===0 || (Math.abs(x)>=8 && z===-3);}
@@ -2415,7 +2417,7 @@ function addWarehouseVisual(x, y, z, level = 1) {
 function addTurretVisual(x, y, z, level = 1) {
     const k = key(x, y, z);
     if (turretObjs.has(k)) disposeObject(turretObjs.get(k));
-    const g = makeTurretModel(level);
+    const g = makeTurretModel(level);addTowerTacticModel(g,defenseState.get(k)?.specialization);
     g.position.set(x,y,z);scene.add(g);turretObjs.set(k,g);
 }
 function makeTurretModel(level = 1) {
@@ -2474,7 +2476,7 @@ function findUpgradeableDefenseNear() {
 function upgradeDefense(hit) {
   const st = hit.state,
     cost = getUpgradeCost(st);
-  if (st.level>=Math.min(MAX_DEF_LV,baseLevel+1)||!canAfford(cost)) return false;
+  if (st.level>=defenseUpgradeLimit()||!canAfford(cost)) return false;
   wood -= cost.wood;
   coal -= cost.coal;
   if(st.type!=='wall'){st.investment ||= equipmentValue(st.type,st.level);st.investment.wood+=cost.wood;st.investment.coal+=cost.coal;}
@@ -2549,9 +2551,10 @@ function updateDefenseCombat(dt, t) {
     const [tx, ty, tz] = k.split(",").map(Number),
       st = defenseState.get(k),
       lv = st ? st.level : 1,
-      range = turretRange(lv)+(villagePrepared("range")?6+villageDepth.levels[1]*.5:0),
-      rate = Math.max(0.34, T_RATE - (lv - 1) * 0.12),
-      dmg = Math.round(turretDmg * (1 + (lv - 1) * 0.55));
+      profile=towerCombatProfile(st),
+      range = profile.range,
+      rate = profile.rate,
+      dmg = Math.round(turretDmg * (1 + (lv - 1) * 0.55)*profile.damage);
     g._cd = (g._cd || 0) - dt;
     if (g._cd > 0) continue;
     let best = null,
@@ -2559,8 +2562,8 @@ function updateDefenseCombat(dt, t) {
     for (const e of enemies) {
       if (!enemyTargetable(e)) continue;
       const d = g.position.distanceTo(e.model.g.position);
-      const score = defenseTargetScore(e,d);
-      if (d < range && score < bd) {
+      const score = defenseTargetScore(e,d)+(st?.specialization==='sniper'&&e.kind==='thrower'?-1000:0)+(st?.specialization==='pierce'&&e.kind==='armored'?-500:0);
+      if (d < range && d>=profile.minRange && score < bd) {
         bd = score;
         best = e;
       }
@@ -2569,7 +2572,7 @@ function updateDefenseCombat(dt, t) {
       g._cd = rate * Math.max(coldAttackInterval(),(st?.frost || 0)>0 ? 2.8 : 1);
       const from = new THREE.Vector3(tx, ty + 2.1, tz),
         dir = enemyAimPoint(best).sub(from).normalize();
-      shootArrow(from, dir, dmg, best);
+      shootArrow(from, dir, dmg, best);arrows.at(-1).tactic=st?.specialization||null;
       sfx("shoot");
     }
   }
@@ -2591,7 +2594,7 @@ function updateDefenseCombat(dt, t) {
       sfx("flame");
       g._cd = Math.max(0.45, 1.15 - lv * 0.18) * Math.max(coldAttackInterval(),(st.frost||0)>0?2.8:1);
       for (const e of targets.slice(0, 3 + lv)) {
-        damageEnemy(e, (10 + lv * 9) * (e.kind==='armored' ? .45 : 1));
+        damageEnemy(e, (10 + lv * 9) * (e.kind==='armored' ? .45 : 1),'flame');
         if(e.kind!=="boss")e.slowUntil=gameElapsed+1.4;
         const aim = enemyAimPoint(e);
         burst(aim.x, aim.y, aim.z, 0xff6b38, 4);
@@ -2936,7 +2939,10 @@ function damageEnemy(e, amount, source="ranged") {
   if (!enemyTargetable(e)) return false;
   // Armored in flight; descending to breathe is the player's damage window.
   const factor = e.kind === "boss" ? (dragonExposed(e) ? 1.25 : 0.6) : 1;
-  if(villageDepthActive()&&e.kind==='armored'&&source!=='melee'&&!villagePrepared('pierce'))amount*=.18;
+  if(villageDepthActive()&&e.kind==='armored'){
+    if(source==='melee')e.guardT=3;
+    else if(source!=='flame'&&source!=='pierce'&&!villagePrepared('pierce')&&!(e.guardT>0))return false;
+  }
   if(villageDepthActive()&&e.kind==='thrower'&&source==='melee'){e.siegeT=0;if(e.siegeMark){disposeObject(e.siegeMark);e.siegeMark=null;}}
   e.hp -= amount * factor;
   if(e.kind==='boss')e.hitFlash=.12;
@@ -3244,7 +3250,7 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
           : makeRaider(scale);
   if (kind !== "boss") {
     colorizeEnemy(model.g, kind);
-    if(villageDepthActive()&&kind==='armored')addVoxelDetails(model.g,[[.16,.95,.9,0x607e91,.42,1,0],[.19,.12,.95,0xc5d7df,.44,1.35,0]]);
+    if(villageDepthActive()&&kind==='armored'){const shield=box(.19,1.05,.95,0x607e91);shield.position.set(.42,1,0);model.g.add(shield);model.g.userData.shield=shield;}
     if(villageDepthActive()&&kind==='thrower')addVoxelDetails(model.g,[[.5,.45,.5,0x84929a,.45,1.5,0],[.16,.9,.15,0x674c3d,.36,1.15,.3]]);
     model.g.scale.multiplyScalar(1.38);
   }
@@ -3300,13 +3306,14 @@ function spawnEnemy(x = null, z = null, kindOverride = null) {
     model,
     hp,
     max: hp,
-    sp,
-    dmg,
+    sp:sp*(villageTacticsActive()?(day>=21?1.35:day>=14?1.18:1):1),
+    dmg:dmg*(villageTacticsActive()?(day>=21?1.8:day>=14?1.4:1):1),
     atkT: 0,
     bar: bf,
     walkT: dailyRandom('combat') * 6,
     targetOutpost,
   });
+  if(villageTacticsActive()&&kind!=='boss'){const e=enemies.at(-1);e.targetOutpost=null;}
   if (kind === "boss") announceDragon(enemies.at(-1));
 }
 
@@ -3364,6 +3371,8 @@ function updateEnemies(dt, t) {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i],
       g = e.model.g;
+    e.guardT=Math.max(0,(e.guardT||0)-dt);
+    if(g.userData.shield)g.userData.shield.rotation.z=e.guardT>0?Math.PI/2:0;
     if (e.hp <= 0) {
       if (e.kind === "boss") bossDefeated = true;
       spawnDeathEffect(e);
@@ -3493,12 +3502,12 @@ function updateProjectiles(dt, t) {
     if (!dead)
       for (const e of enemies)
         if (
-          enemyTargetable(e) &&
+          enemyTargetable(e) && (a.tactic!=='sniper'||e===a.home) &&
           new THREE.Line3(previousPosition, a.m.position)
             .closestPointToPoint(enemyAimPoint(e), true, new THREE.Vector3())
             .distanceTo(enemyAimPoint(e)) < (e.kind === "boss" ? 1.25 : 0.8)
         ) {
-          damageEnemy(e, a.dmg);
+          applyTacticHit(a,e);
           if(a.kind==='axe'){spawnVoxelBreakup(a.m.position.x,a.m.position.y,a.m.position.z,0xb7d5df,3);sfx("axeHit");if(settings.motion)shake=Math.max(shake,.35);}
           else if(a.kind==='bullet')sfx('gunHit');
           burst(a.m.position.x, a.m.position.y, a.m.position.z, 0xffe08a, 3);
@@ -4390,6 +4399,7 @@ function resetConstruction() {
 // ---- input ----
 // Only movement is bound; one pointer owns the joystick until release/cancel.
 const keys = {};
+let facilityTap=null;
 let joyId = null,
   joyVec = { x: 0, y: 0 };
 const joyBase = $("joyBase"),
@@ -4425,7 +4435,7 @@ function bindInput() {
       cancelContext();
       e.preventDefault();
       window.getSelection?.()?.removeAllRanges();
-      joyId = e.pointerId;
+      joyId = e.pointerId;facilityTap={id:e.pointerId,x:e.clientX,y:e.clientY,moved:false};
       canvas.setPointerCapture?.(joyId);
       const rect = canvas.getBoundingClientRect();
       joyBase._ox = e.clientX - rect.left;
@@ -4441,6 +4451,7 @@ function bindInput() {
     const rect = canvas.getBoundingClientRect();
     let dx = e.clientX - rect.left - joyBase._ox,
       dy = e.clientY - rect.top - joyBase._oy;
+    if(facilityTap&&Math.hypot(dx,dy)>9)facilityTap.moved=true;
     const d = Math.hypot(dx, dy),
       max = 48;
     if (d > max) {
@@ -4452,7 +4463,7 @@ function bindInput() {
     joyKnob.style.top = joyBase._oy + dy - 27 + "px";
   });
   const end = (e) => {
-    if (e.pointerId === joyId) resetInput();
+    if(e.pointerId===joyId){const tap=facilityTap;facilityTap=null;resetInput();if(e.type==='pointerup'&&tap&&!tap.moved)selectFacilityAt(e.clientX,e.clientY);}
   };
   addEventListener("pointerup", end);
   addEventListener("pointercancel", end);
@@ -4585,14 +4596,14 @@ function costWords(c) {
       .join(" ・ ") || "資材不要"
   );
 }
-function actionCandidates() {
-  const list = [...villageDepthActions(),...journeyActions(),...expeditionActions(),...equipmentActions()];
+function actionCandidates(inspectAll=false) {
+  const list = [...villageDepthActions(inspectAll),...journeyActions(),...expeditionActions(),...equipmentActions(inspectAll)];
   const add = (a, distance, reach) => {
-    if (distance <= reach) list.push({ ...a, distance });
+    if (inspectAll || distance <= reach) list.push({ ...a, distance });
   };
   for (const p of buildPads) {
     if(p.type!=="wall")continue;
-    if ((phase === "night" && !inNightRespite()) || p.built || p.constructing || !padUnlocked(p) || baseLevel < requiredBaseLevel(p.type))
+    if ((!inspectAll&&phase === "night" && !inNightRespite()) || p.built || p.constructing || (!inspectAll&&(!padUnlocked(p) || baseLevel < requiredBaseLevel(p.type))))
       continue;
     if (
       introStep < 2 ||
@@ -4605,6 +4616,7 @@ function actionCandidates() {
         title: typeName(p.type,p.x,p.z) + "を建てる",
         effect: buildingBenefit(p.type,p.x,p.z),
         cost: getBuildCost(p),
+        available:phase==='day'&&padUnlocked(p)&&baseLevel>=requiredBaseLevel(p.type),
         x: p.x,
         z: p.z,
         tag: p.tag,
@@ -4643,7 +4655,7 @@ function actionCandidates() {
     add(
       {
         id: "fuel",
-        title: "炉へ石炭を届ける",
+        title: "炉 · 燃料と断熱 Lv."+(villageDepth?.furnaceLevel||1),
         effect: "燃料 +40%",
         cost: { coal: 10 },
         x: -1.8,
@@ -4662,13 +4674,14 @@ function actionCandidates() {
       Math.hypot(pPos.x + 1.8, pPos.z),
       1.55,
     );
-    if (phase === "day" && baseLevel < 5)
+    if (inspectAll || (phase === "day" && baseLevel < 5))
       add(
         {
           id: "base",
-          title: `拠点をLv.${baseLevel + 1}へ`,
-          effect: "耐久 +120 / 攻撃と道具が進化",
-          cost: baseUpgradeCost(),
+          title: baseLevel>=5?"拠点 Lv.5（最大）":`拠点をLv.${baseLevel + 1}へ`,
+          available:phase==='day'&&baseLevel<5,
+          effect: baseLevel>=5?"村を守る耐久・最大強化":"耐久 +120 / 攻撃と道具が進化",
+          cost: baseLevel>=5?{}:baseUpgradeCost(),
           x: 1.8,
           z: 0,
           tag: baseGroundTag,
@@ -4677,7 +4690,7 @@ function actionCandidates() {
         Math.hypot(pPos.x - 1.8, pPos.z),
         1.55,
       );
-    if (phase === "day")
+    if (inspectAll || phase === "day")
       for (const [k, st] of defenseState) {
         if (st.type !== "wall") continue;
         const [x, y, z] = k.split(",").map(Number);
@@ -4686,7 +4699,7 @@ function actionCandidates() {
             id: "upgrade:" + k,
             title: typeName(st.type,x,z) + (st.level>=MAX_DEF_LV ? ` Lv.${st.level}（最大）` : ` Lv.${st.level} → ${st.level+1}`),
             manual: st.type === "wall",
-            available: st.level < Math.min(MAX_DEF_LV,baseLevel+1),
+            available:phase==='day'&&st.level < defenseUpgradeLimit(),
             effect:
               st.type === "wall"
                 ? st.level>=MAX_DEF_LV ? "これ以上は強化できません" : `耐久 ${Math.ceil(st.hp)} → ${getDefenseMaxHp(st.type,st.level+1)}・全回復`
@@ -4735,7 +4748,7 @@ function confirmDefenseUpgrade(){
   haptic(20);saveRun();updateDwell(0);return true;
 }
 function updateManualTarget(){
-  const a=actionFocus,visible=running&&!paused&&actionReady(a)&&a?.manual&&actionCandidates().some(c=>c.id===a.id);
+  const a=actionFocus,visible=running&&!paused&&!!contextInspectId&&a?.manual;
   if(!manualTargetOutline&&visible){
     manualTargetOutline=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)),new THREE.LineBasicMaterial({color:0xffdd78,depthTest:false}));
     manualTargetOutline.renderOrder=30;scene.add(manualTargetOutline);
@@ -4889,7 +4902,7 @@ function preparationAdvice() {
   if(baseHP < baseMax*.9){
     const missing=wood<30?'wood':coal<5?'coal':null;
     return {title:`集落の耐久 ${Math.ceil(baseHP/baseMax*100)}% → 修理を優先`,
-      sub:missing?`修理に木材30・石炭5 / ${missing==='wood'?'木':'黒い鉱石'}を集めよう`:'木材30・石炭5 / 光る場所で指を離す',
+      sub:missing?`修理に木材30・石炭5 / ${missing==='wood'?'木':'黒い鉱石'}を集めよう`:'木材30・石炭5 / 施設をタップして確認',
       target:missing?nearbyResource(missing):{x:0,z:-2.5}};
   }
     const reserve=nextRaid.kind==='fuel'?30:20;
@@ -4908,7 +4921,7 @@ const front=buildPads.filter(p=>p.type==='turret' && p.x*Math.cos(nextRaid.angle
       const target={x:missingTower.x+(missingTower.x<0?1.7:-1.7),z:missingTower.z};
       return {title:`${nextRaid.direction}側の設備を選ぼう`,sub:`${equipmentUsed()}/${equipmentCapacity}枠 · 矢塔は単体 / 火炎は群れ / ${raid}`,target:wood>=40?target:nearbyResource('wood')};
     }
-    const towers=[...defenseState].filter(([,s])=>s.type==='turret'&&s.level<Math.min(MAX_DEF_LV,baseLevel+1))
+    const towers=[...defenseState].filter(([,s])=>s.type==='turret'&&s.level<defenseUpgradeLimit())
       .map(([k,s])=>{const [x,,z]=k.split(',').map(Number);return{x,z,s};})
       .filter(p=>p.x*Math.cos(nextRaid.angle)+p.z*Math.sin(nextRaid.angle)>4)
       .sort((a,b)=>a.s.level-b.s.level);
@@ -4922,7 +4935,7 @@ const front=buildPads.filter(p=>p.type==='turret' && p.x*Math.cos(nextRaid.angle
     const cost=tower?getUpgradeCost(tower.s):null;
     if(tower && day>1 && wood>=cost.wood && coal>=cost.coal+reserve)
       return {title:`矢塔を強化するか、役割を交換`,sub:`木材${cost.wood}・石炭${cost.coal} / ${raid}`,target:{x:tower.x+(tower.x<0?1.7:-1.7),z:tower.z}};
-      const frontWalls=[...defenseState].filter(([k,s])=>{const [x,,z]=k.split(',').map(Number);return s.type==='wall'&&s.level<Math.min(MAX_DEF_LV,baseLevel+1)&&x*Math.cos(nextRaid.angle)+z*Math.sin(nextRaid.angle)>5.5;}).sort((a,b)=>a[1].level-b[1].level);
+      const frontWalls=[...defenseState].filter(([k,s])=>{const [x,,z]=k.split(',').map(Number);return s.type==='wall'&&s.level<defenseUpgradeLimit()&&x*Math.cos(nextRaid.angle)+z*Math.sin(nextRaid.angle)>5.5;}).sort((a,b)=>a[1].level-b[1].level);
     if(day>=3 && frontWalls.length){
       const [k,st]=frontWalls[0],[x,,z]=k.split(',').map(Number),c=getUpgradeCost(st),vertical=Math.abs(x)>=Math.abs(z),gate=isGateWall(x,z);
       const target={x:x+(vertical?(x<0?1.2:-1.2):(gate?1.6:0)),z:z+(vertical?(gate?1.8:0):(z<0?1.2:-1.2))};
@@ -5071,7 +5084,7 @@ function snapshotRun() {
         hp: s.hp,
         maxHp: s.maxHp,
         cooldown: (turretObjs.get(k) || flameObjs.get(k))?._cd || 0,
-        frost:s.frost||0,supportT:s.supportT||0,
+        frost:s.frost||0,supportT:s.supportT||0,specialization:s.specialization||null,
         investment:s.investment?{...s.investment}:undefined,
       },
     ]),
@@ -5097,7 +5110,7 @@ function snapshotRun() {
     rescue: rescueNPC?.g.position.toArray() || null,
     enemies: enemies.map((e) => ({
       kind: e.kind,
-      siegeT:e.siegeT||0,
+      siegeT:e.siegeT||0,guardT:e.guardT||0,
       maneuver:e.maneuver||null,maneuverT:e.maneuverT||0,cycles:e.cycles||0,diveFrom:e.diveFrom||null,legacyMotion:!!e.legacyMotion,slowUntil:e.slowUntil||0,
       p: e.model.g.position.toArray(),
       hp: e.hp,
@@ -5114,7 +5127,7 @@ function snapshotRun() {
       aim: e.aim || null,
     })),
     arrows: arrows.map((a) => ({
-      kind:a.kind||"arrow",
+      kind:a.kind||"arrow",tactic:a.tactic||null,
       p: a.m.position.toArray(),
       dir: a.v.clone().normalize().toArray(),
       dmg: a.dmg,
@@ -5154,7 +5167,10 @@ function validRun(s) {
     return false;
   if(s.daily!=null&&!validDailyMeta(s.daily))return false;
   if(s.enemies?.some(e=>e.siegeT!=null&&(!Number.isFinite(e.siegeT)||e.siegeT<0||e.siegeT>4.1)))return false;
+  if(s.enemies?.some(e=>e.guardT!=null&&(!Number.isFinite(e.guardT)||e.guardT<0||e.guardT>3)))return false;
   if(s.depth!=null&&!validVillageDepth(s.depth))return false;
+  if(s.defenses?.some(([,v])=>v.specialization!=null&&(!TOWER_TACTICS[v.specialization]||v.type!=='turret')))return false;
+  if(s.arrows?.some(a=>a.tactic!=null&&!TOWER_TACTICS[a.tactic]))return false;
   if(s.villageLayout!=null&&![0,2].includes(s.villageLayout))return false;
   if(s.journey!=null&&!validJourney(s.journey))return false;
   if(s.frontier!=null&&(!Number.isInteger(s.frontier)||s.frontier<0||s.frontier>2))return false;
@@ -5441,6 +5457,9 @@ function resumeRun(override = null) {
     $("waveBanner").innerHTML="";
     campaign.cleared = cleared;
     villageDepth=survivalEnabled?(s.depth?villageClone(s.depth):newVillageDepth(Math.max(7,s.state.day+1))):null;
+    if(villageDepth)villageDepth.rewardVersion=2;
+      if(villageDepth&&!villageDepth.tacticsVersion){villageDepth.tacticsVersion=1;villageDepth.tacticsStartDay=Math.max(7,s.state.day+(s.state.phase==='night'?1:0));}
+      if(villageDepth)villageDepth.furnaceLevel ||= 1;
     if(survivalEnabled&&!s.depth&&s.state.day>=7)villageDepth.graceUntil=s.state.day+3;
     ({
       wood,
@@ -5531,7 +5550,7 @@ function resumeRun(override = null) {
       spawnEnemy(v.p[0], v.p[2], v.kind);
       const e = enemies.at(-1);
       Object.assign(e, {
-        siegeT:v.siegeT||0,
+        siegeT:v.siegeT||0,guardT:v.guardT||0,
         hp: v.hp,
         max: v.max,
         sp: v.sp,
@@ -5557,7 +5576,7 @@ function resumeRun(override = null) {
         enemies[a.target] || null,
         a.kind||"arrow",
       );
-      arrows.at(-1).life = a.life;
+      arrows.at(-1).life = a.life;arrows.at(-1).tactic=a.tactic||null;
     }
     pPos.fromArray(s.p);
     player.position.copy(pPos);
@@ -5830,7 +5849,7 @@ function update(dt, t) {
     temp = -25 - (day - 1) * 4;
     fuel -=
       (0.9 + (villageRules?Math.min(day,12):day) * 0.12) *
-      fireDrainMul *
+      fireDrainMul * (survivalEnabled?1-((villageDepth?.furnaceLevel||1)-1)*.1:1) *
       (nightModifier === "fuel" ? 1.7 : 1) *
       dt;
     fuel=Math.max(0,fuel);
@@ -5965,8 +5984,8 @@ function showUpgradeCards(savedPicks = null) {
     {icon:"supply",name:"遠征の輸送路",desc:"確保した資源拠点が夜も生産 / 守る範囲が広がる",apply:()=>{campPlan="supply";}},
     {icon:"fort",name:"本陣の迎撃指示",desc:"矢塔は射程内の破城兵・投擲兵を優先 / 狼への射撃は後回し",apply:()=>{campPlan="guard";}}
   );
-  villageDepthRewards(pool);
-  const indices = savedPicks || chooseCampRewards();
+  villageRewards(pool);
+  const indices = survivalEnabled?chooseCampRewards():savedPicks || chooseCampRewards();
   activeUpgradePicks = indices;
   const picks = indices.map((i) => pool[i]),
     wrap = $("upgradeCards");
@@ -6009,7 +6028,7 @@ function showUpgradeCards(savedPicks = null) {
       if(!saveRun()&&survivalEnabled){resumeRun(beforeReward);return;}
       updateHUD();
       const advice = preparationAdvice();
-      showWaveBanner("☀️ DAY " + day, advice.title);
+      showWaveBanner("☀️ DAY " + day, villageUnlockCaption()||advice.title);
       toast(advice.sub);
     },()=>upgrading&&!dawnScene&&!$("upgrade").classList.contains("hidden"));
     wrap.appendChild(b);
@@ -6129,6 +6148,7 @@ function startGame(stage = currentStage, journeyRun=null) {
     baseLabelEl.remove();
     baseLabelEl = null;
   }
+  if(fireGroup.userData.insulation){const old=fireGroup.userData.insulation;fireGroup.remove(old);disposeObject(old);}
   fireGroup.userData = {};
   clearGroundTags();
   baseGroundTag = null;
@@ -6178,7 +6198,7 @@ function nightEnemyCountForStage(n, stage) {
 let campPlan = "none", dawnScene = null, trackedOutpost = null, outpostNotice = null;
 function chooseCampRewards() {
   if(dailyRun){const offset=(dailyRun.seed+day*3)%7;return [offset,(offset+2)%7,(offset+4)%7];}
-  if(villageDepthActive())return [0,1,2];
+  if(survivalEnabled)return [0,1,2];
   const ordinary = [0,1,2,3,4,5,6].sort(()=>Math.random()-.5);
   return currentStage >= 2 && day === 2 ? [7,8,ordinary[0]] : ordinary.slice(0,3);
 }
@@ -6301,14 +6321,13 @@ function equipmentQuote(p,type){
   const before=old?(old.investment||equipmentValue(old.type,level)):{wood:0,coal:0},after=type==='remove'?{wood:0,coal:0}:equipmentValue(type,level);
   return {level,cost:{wood:Math.max(0,after.wood-before.wood),coal:Math.max(0,after.coal-before.coal)},refund:{wood:Math.max(0,before.wood-after.wood),coal:Math.max(0,before.coal-after.coal)}};
 }
-function equipmentActions(){
-  if(phase!=='day'||introStep<2)return [];
-  const p=buildPads.filter(p=>p.type!=='wall'&&!p.constructing&&(introStep!==2||p.index===12)).map(p=>({p,d:distanceToDefense(p.type,p.x,p.z)})).filter(v=>v.d<=1.4).sort((a,b)=>a.d-b.d)[0]?.p;
-  if(!p)return [];
-  const st=defenseState.get(key(p.x,1,p.z));
-  const type=contextChoice?.index===p.index&&contextChoice.type||st?.type||p.type;
-  const c=st?(st.level>=MAX_DEF_LV?{}:getUpgradeCost(st)):getBuildCost({...p,type,cost:EQUIPMENT[type].wood});
-  return [{id:'equipment:'+p.index,title:st?typeName(st.type)+' Lv.'+st.level+' → '+Math.min(MAX_DEF_LV,st.level+1):typeName(type)+'を建てる',manual:true,available:st?st.level<Math.min(MAX_DEF_LV,baseLevel+1):equipmentUsed()<equipmentCapacity&&baseLevel>=requiredBaseLevel(type),cost:c,effect:st?'全回復・性能アップ':EQUIPMENT[type].role,x:p.x,z:p.z,tag:p.tag,previewType:type,previewLevel:st?Math.min(MAX_DEF_LV,st.level+1):1,button:st?'強化する':'建てる',apply:()=>{if(st)return upgradeDefense({x:p.x,y:1,z:p.z,state:st});return transactEquipment(p,type);},distance:distanceToDefense(p.type,p.x,p.z)}];
+function equipmentActions(inspectAll=false){
+ if((!inspectAll&&phase!=='day')||introStep<2)return [];
+ return buildPads.filter(p=>p.type!=='wall'&&(introStep!==2||p.index===12)&&(inspectAll||distanceToDefense(p.type,p.x,p.z)<=1.4)).map(p=>{
+ const st=defenseState.get(key(p.x,1,p.z)),type=contextChoice?.index===p.index&&contextChoice.type||st?.type||p.type;
+ const c=st?(st.level>=MAX_DEF_LV?{}:getUpgradeCost(st)):getBuildCost({...p,type,cost:EQUIPMENT[type].wood});
+ return {id:'equipment:'+p.index,title:st?(TOWER_TACTICS[st.specialization]?.name||typeName(st.type))+' Lv.'+st.level+(st.level>=MAX_DEF_LV?'（最大）':' → '+(st.level+1)):typeName(type)+'を建てる',manual:true,available:phase==='day'&&!p.constructing&&(st?st.level<defenseUpgradeLimit():equipmentUsed()<equipmentCapacity&&baseLevel>=requiredBaseLevel(type)),cost:c,effect:st?'全回復・性能アップ':EQUIPMENT[type].role,x:p.x,z:p.z,tag:p.tag,previewType:type,previewLevel:st?Math.min(MAX_DEF_LV,st.level+1):1,button:st?'強化する':'建てる',apply:()=>{if(phase!=='day')return false;if(st)return upgradeDefense({x:p.x,y:1,z:p.z,state:st});return transactEquipment(p,type);},distance:distanceToDefense(p.type,p.x,p.z)};
+ });
 }
 function openEquipment(p){
   equipmentDraft={index:p.index,type:null};resetInput();pauseWasRunning=running;running=false;paused=true;
@@ -6352,6 +6371,7 @@ function confirmEquipment(){
   closeEquipment();return true;
 }
 function updateSupport(dt){
+  updateVillageFieldSupport(dt);
   for(const [k,st] of defenseState){
     st.frost=Math.max(0,(st.frost||0)-dt);
     const g=turretObjs.get(k)||flameObjs.get(k)||warehouseObjs.get(k);
@@ -6465,10 +6485,11 @@ function threatGroups(){
    let g=groups.get(sector);const distance=Math.hypot(pos.x,pos.z);
    if(!g){g={x:pos.x,z:pos.z,kind:e.kind,n:0,distance,forecast:false};groups.set(sector,g);}
    g.n++;if(distance<g.distance||e.kind==='boss'){g.x=pos.x;g.z=pos.z;g.kind=e.kind;g.distance=distance;}}
- return [...groups.values()].sort((a,b)=>a.distance-b.distance).slice(0,3);
+ return [...groups.values()].sort((a,b)=>a.distance-b.distance).slice(0,4);
 }
 function updateEdgeCues(){
- const ids=['raidDirection','flankDirection','thirdThreat'];for(const id of ids)$(id).hidden=true;
+ updateTacticsForecast();
+ const ids=['raidDirection','flankDirection','thirdThreat','fourthThreat'];for(const id of ids)$(id).hidden=true;
  $('furnaceDirection').hidden=true;
  if(!running||paused||introStep<4)return;
  const rect=renderer.domElement.getBoundingClientRect(),top=Math.max(110,$('hud').getBoundingClientRect().bottom-rect.top+44),bottom=rect.height-155;
@@ -6485,6 +6506,7 @@ function updateEdgeCues(){
  }
  place('furnaceDirection',{x:fireGroup.position.x,z:fireGroup.position.z,kind:'furnace',distance:30,n:0});
  const groups=threatGroups();
+ if(!groups.length&&villageTacticsActive())for(const a of villageAttackAngles())groups.push({x:Math.cos(a)*30,z:Math.sin(a)*30,kind:villageThreat()==='flank'?'wolf':'thrower',n:0,distance:30,forecast:true});
  if(!groups.length&&nextRaid)groups.push({x:Math.cos(nextRaid.angle)*30,z:Math.sin(nextRaid.angle)*30,kind:nextRaid.kind==='boss'?'boss':nextRaid.kind==='wolf'?'wolf':nextRaid.kind==='armored'?'armored':nextRaid.kind==='siege'?'breaker':'raider',n:0,distance:30,forecast:true});
  if(villageRules&&day>=4&&groups.length===1&&groups[0].forecast){const a=nextRaid.angle+Math.PI;groups.push({x:Math.cos(a)*30,z:Math.sin(a)*30,kind:'thrower',n:0,distance:30,forecast:true});}
  groups.forEach((g,i)=>place(ids[i],g));
@@ -6588,14 +6610,14 @@ function contextQuote(a=actionFocus){
   if(!a)return '';
   const p=a.id.startsWith('equipment:')?buildPads[Number(a.id.split(':')[1])]:null;
   const st=defenseState.get(key(a.x,1,a.z));
-  return JSON.stringify([a.id,a.cost,a.available!==false,a.previewType,a.previewLevel,st?.type,st?.level,p?.built,p?.constructing,baseLevel,phase,day,expedition.route,expedition.usedNight,contextRevision]);
+  return JSON.stringify([a.id,a.cost,a.available!==false,a.previewType,a.previewLevel,st?.type,st?.level,st?.specialization,p?.built,p?.constructing,baseLevel,phase,day,expedition.route,expedition.usedNight,contextRevision]);
 }
-function contextCurrent(){const all=actionCandidates();return all.find(a=>a.id===contextInspectId)||chooseNearbyAction(all.filter(actionReady));}
+function contextCurrent(){return contextInspectId?actionCandidates(true).find(a=>a.id===contextInspectId)||null:null;}
 function executeContext(quote){
   if(!running||paused||document.hidden||contextLost||joyId!==null||movementRequested()||Date.now()-contextLastCommit<350)return false;
   const a=contextCurrent();if(!a||contextQuote(a)!==quote||a.available===false||!canAfford(a.cost))return false;
   if(a.id.startsWith('village:service')){beginContextChoice('village');return true;}
-  if(!a.apply())return false;
+  if(!facilityInReach(a)||!a.apply())return false;
   contextLastCommit=Date.now();cancelContext();actionTime=0;defenseActionConsumed=true;
   haptic(20);saveRun();actionFocus=contextCurrent();updateContextUI();return true;
 }
@@ -6635,7 +6657,7 @@ function transactEquipment(p,type){
 }
 function beginContextChoice(mode){
   const p=contextPad();if(!actionFocus||(phase!=='day'&&mode!=='info'))return;
-  contextChoice={id:actionFocus.id,index:p?.index,type:p?.type,mode};contextChoosing=phase==='day';contextRevision++;contextArmed=null;updateContextUI();
+  contextChoice={id:actionFocus.id,index:p?.index,type:p?.type,mode};contextChoosing=false;contextRevision++;contextArmed=null;updateContextUI();
 }
 function chooseRoute(kind){
   if(!running||paused||phase!=='day'||day<2||!expedition.pilot||expedition.work)return false;
@@ -6649,25 +6671,27 @@ function optionButton(parent,label,disabled,quote,apply){
 function renderContextOptions(a,p){
   const box=$('contextOptions'),mode=contextChoice?.mode;
   const st=p&&defenseState.get(key(p.x,1,p.z));
-  const sig=[a.id,mode,p?.type,st?.type,st?.level,baseLevel,equipmentUsed(),wood,coal,iron,expedition.route,JSON.stringify(villageDepth),contextChoice?.workMenu,villageRepairCost().wood].join('|');
+  const sig=[a.id,mode,p?.type,st?.type,st?.level,st?.specialization,baseLevel,equipmentUsed(),wood,coal,iron,expedition.route,JSON.stringify(villageDepth),contextChoice?.workMenu,villageRepairCost().wood].join('|');
   const show=!!mode;
   box.hidden=!show;if(!show)return;
+  if(contextArmed&&[...box.children].includes(contextArmed.button))return;
   if(box._signature===sig)return;box._signature=sig;for(const child of [...box.children])child.remove();
   box.dataset.layout='';
-  if(mode==='info')return;
+  if(mode==='info'){if(p)renderTacticOptions(box,p);if(a.id==='fuel')renderFurnaceOptions(box);if(a.id==='base')renderCampRepair(box);return;}
   if(mode==='village'){renderVillageWorkOptions(box);return;}
   if(p){
+    if(mode==='exchange')renderTacticOptions(box,p);
     for(const [type,e] of Object.entries(EQUIPMENT)){
       if(st?.type===type)continue;
       const q=equipmentQuote(p,type),locked=baseLevel<requiredBaseLevel(type);
       const label=mode==='exchange'?`${e.name}へ交換 · ${costWords(q.cost)}${q.refund.wood||q.refund.coal?' / 返却 '+costWords(q.refund):''} · 失う効果: ${EQUIPMENT[st.type].role}${locked?' · 集落Lv.'+requiredBaseLevel(type)+'で解放':''}`:`${e.name}を選ぶ${locked?' · 集落Lv.'+requiredBaseLevel(type):''}`;
       const b=optionButton(box,label,locked||(mode==='exchange'&&!canAfford(q.cost)),()=>contextQuote(contextCurrent())+JSON.stringify(equipmentQuote(p,type)),()=>{
-        if(contextCurrent()?.id!==a.id)return;
+        if(contextCurrent()?.id!==a.id||!facilityInReach(a))return;
         if(mode==='exchange'){
           if(Date.now()-contextLastCommit<350)return;
           if(transactEquipment(p,type)){contextLastCommit=Date.now();cancelContext();saveRun();updateDwell(0);}
         }else{
-          contextChoice={id:a.id,index:p.index,type,mode:'type'};contextChoosing=true;contextRevision++;updateDwell(0);
+          contextChoice={id:a.id,index:p.index,type,mode:'type'};contextChoosing=false;contextRevision++;updateDwell(0);
         }
       });b.setAttribute('aria-label',label);
       b.innerHTML=equipmentGlyph(type)+'<span>'+label+'</span>';
@@ -6701,34 +6725,35 @@ function updateContextRoutes(){
     const b=optionButton(menu,label,false,()=>[phase,day,expedition.facility,expedition.engineer,!!expedition.work].join('|'),()=>chooseRoute(kind));b.title=expeditionDescription(kind);
   }
 }
-function actionVisualPoint(a){return a.id==='fuel'?fireGroup.position:['base','repair'].includes(a.id)&&campCore?campCore.position:a;}
+function actionVisualPoint(a){if(a.id.startsWith('village:service'))return settlementObjs[Number(a.id.slice(-1))]?.position||a;return a.id==='fuel'?fireGroup.position:['base','repair'].includes(a.id)&&campCore?campCore.position:a;}
 function updateContextUI(){
   updateContextRoutes();updateQuietInspect();
   const a=contextCurrent();if(contextChoice&&contextChoice.id!==a?.id)cancelContext();actionFocus=a;
   const panel=$('actionPanel');panel.hidden=!running||paused||!a;
-  $('defenseChoices').hidden=true;$('actionTrack').hidden=true;
+  $('defenseChoices').hidden=true;$('actionTrack').hidden=true;$('campSwitch').hidden=!a||!['fuel','base'].includes(a.id);
+  $('selectFurnace').setAttribute('aria-pressed',String(a?.id==='fuel'));$('selectCamp').setAttribute('aria-pressed',String(a?.id==='base'));
   if(panel.hidden){if(contextPreview)contextPreview.visible=false;return;}
   if(a.id.startsWith('village:service')&&!contextChoice){contextChoice={id:a.id,mode:'village',automatic:true};contextChoosing=false;}
   const p=contextPad(),st=p&&defenseState.get(key(p.x,1,p.z));
   $('actionTitle').textContent=contextChoice?.mode==='exchange'?typeName(st.type)+' Lv.'+st.level+'を交換':a.title;
-  $('actionCost').textContent=contextInspectId&&!actionReady(a)?blockedReason(a):contextChoice?.mode==='info'?a.effect:!canAfford(a.cost)?'資材不足 · '+costWords(a.cost):a.id.startsWith('engineer:')?a.effect:'';
+  $('actionCost').textContent=facilityDetails(a);
   $('actionCost').hidden=!$('actionCost').textContent;
   $('actionHelp').hidden=true;
-  const button=$('confirmDefense');button.hidden=['exchange','village'].includes(contextChoice?.mode);
-  button.textContent=(a.button||a.title)+' · '+costWords(a.cost);
-  button.disabled=a.available===false||!canAfford(a.cost)||!!p?.constructing;
+  const button=$('confirmDefense');button.hidden=['exchange','village'].includes(contextChoice?.mode)||(survivalEnabled&&st?.type==='turret'&&contextChoice?.mode==='info');
+  button.textContent=a.id==='fuel'?'石炭10で補給':a.id==='base'?(baseLevel>=5?'最大強化':'拠点を強化する'):(a.button||a.title);
+  button.disabled=a.available===false||!canAfford(a.cost)||!!p?.constructing||!facilityInReach(a);
   $('contextExchange').hidden=!st||phase!=='day';
-  $('contextClose').hidden=contextChoice?.automatic||(!contextChoice&&!contextInspectId);
-  $('contextInfo').hidden=a.id.startsWith('village:service');
+  $('contextClose').hidden=false;
+  $('contextInfo').hidden=a.id.startsWith('village:service')||['fuel','base'].includes(a.id);
   $('contextPause').hidden=!contextChoosing;
-  $('contextInfo').textContent=p&&!st?'⇄':'ⓘ';
+  $('contextInfo').textContent=p&&!st?'⇄':st?.type==='turret'&&survivalEnabled?'特化':'ⓘ';
   $('contextInfo').setAttribute('aria-label',p&&!st?'施設の種類を選ぶ':'設備の詳細');
   renderContextOptions(a,p);updateContextPreview(a,p);
-  // Anchor the one target card beneath its world position, within the safe play area.
+  // Dock details above movement controls; the selected world target stays outlined.
   const anchor=actionVisualPoint(a),rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(anchor.x,.5,anchor.z).project(camera);
   const width=Math.min(292,rect.width-24),height=panel.offsetHeight||100;
-  panel.style.width=width+'px';panel.style.left=Math.max(12,Math.min(rect.width-width-12,(v.x*.5+.5)*rect.width-width/2))+'px';
-  panel.style.top=Math.max(155,Math.min(rect.height-height-110,(-v.y*.5+.5)*rect.height+42))+'px';
+  panel.style.width=width+'px';panel.style.left=(rect.width-width)/2+'px';
+  panel.style.top=Math.max(155,rect.height-height-110)+'px';
   if(introStep===2&&a.id.startsWith('equipment:')){
     const r=button.getBoundingClientRect(),hand=$('gestureGuide');hand.hidden=false;hand.setAttribute('data-tap','true');
     hand.style.left=(r.left-rect.left+r.width*.7)+'px';hand.style.top=(r.top-rect.top+10)+'px';
@@ -6760,7 +6785,8 @@ function updateContextPreview(a,p){
   contextPreview.visible=true;
 }
 function bindContextControls(){
-  bindFreshPress($('siteInspect'),()=>JSON.stringify(blockedNearby()?.id),()=>{const a=blockedNearby();if(a){contextInspectId=a.id;contextChoosing=true;updateContextUI();}});
+  for(const [button,id]of [['selectFurnace','fuel'],['selectCamp','base']])bindFreshPress($(button),()=>contextQuote(),()=>inspectFacility(id));
+  bindFreshPress($('siteInspect'),()=>JSON.stringify(blockedNearby()?.id),()=>{const a=blockedNearby();if(a){contextInspectId=a.id;contextChoosing=false;updateContextUI();}});
   bindFreshPress($('confirmDefense'),()=>contextQuote(contextCurrent()),executeContext);
   bindFreshPress($('contextExchange'),()=>contextQuote(contextCurrent()),()=>beginContextChoice('exchange'));
   bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id.startsWith('village:service')?'village':actionFocus?.id==='expedition:sawmill'?'expedition':contextPad()&&!contextPad().built?'type':'info'));
@@ -6800,9 +6826,10 @@ function makeCampCoreModel(level){
  return g;
 }
 function updateFurnaceEvolution(){
+ updateFurnaceInsulationVisual();
  if(campCore?.userData.level===baseLevel)return;
  if(campCore)disposeObject(campCore);
- campCore=makeCampCoreModel(baseLevel);campCore.position.set(1.1,0,-1.2);scene.add(campCore);
+ campCore=makeCampCoreModel(baseLevel);campCore.position.set(2.6,0,-1.2);scene.add(campCore);
 }
 
 function evolveDefenseModel(g,type,level){
@@ -6858,7 +6885,7 @@ function blockedReason(a){
  if(!canAfford(a.cost))return '資材不足・'+costWords(a.cost);
  return a.id==='fuel'?'燃料は十分':a.effect||'利用できません';
 }
-function updateQuietInspect(){const b=$('siteInspect'),a=blockedNearby();b.hidden=!running||paused||!!contextInspectId||!!actionCandidates().find(actionReady)||!a;b.textContent='⌕ 条件';}
+function updateQuietInspect(){$('siteInspect').hidden=true;}
 function objectiveReady(o){
  // Preparation destinations are approach points, not building centers.
  // Do not advertise a remote task while standing at an unavailable local action.
@@ -7171,25 +7198,27 @@ function evolveLowVillageDefense(g,type,level){
 
 
 // ---- village-depth ----
-// Late village play: saved preparation and work, without moving any footprint.
+// Village rewards apply from day one. Advanced threats/services unlock separately.
 let villageDepth=null;
-function newVillageDepth(activateDay=7){return {version:1,activateDay,preparedDay:0,preparation:'none',parts:0,graceUntil:0,levels:[0,0,0],completed:0,job:null,lastCompletedDay:0};}
+function newVillageDepth(activateDay=7){return {version:1,rewardVersion:2,tacticsVersion:1,tacticsStartDay:7,furnaceLevel:1,activateDay,preparedDay:0,preparation:'none',parts:0,fuelDay:0,fuelUsed:0,graceUntil:0,levels:[0,0,0],completed:0,job:null,lastCompletedDay:0};}
 function validVillageDepth(v){
  const int=(x,max)=>Number.isInteger(x)&&x>=0&&x<=max;
- return v?.version===1&&int(v.graceUntil??0,10000)&&int(v.activateDay,10000)&&int(v.preparedDay,9999)&&['none','range','pierce','repair'].includes(v.preparation)&&Number.isFinite(v.parts)&&v.parts>=0&&v.parts<=1000&&Array.isArray(v.levels)&&v.levels.length===3&&v.levels.every(x=>int(x,3))&&int(v.completed,9999)&&int(v.lastCompletedDay,9999)&&(v.job===null||(int(v.job.track,2)&&int(v.job.day,9999)));
+ return v?.version===1&&(v.tacticsVersion==null||v.tacticsVersion===1)&&(v.tacticsStartDay==null||int(v.tacticsStartDay,10000))&&(v.furnaceLevel==null||(int(v.furnaceLevel,3)&&v.furnaceLevel>=1))&&(v.rewardVersion==null||v.rewardVersion===2)&&int(v.fuelDay??0,10000)&&int(v.fuelUsed??0,3)&&int(v.graceUntil??0,10000)&&int(v.activateDay,10000)&&int(v.preparedDay,9999)&&['none','range','pierce','repair'].includes(v.preparation)&&Number.isFinite(v.parts)&&v.parts>=0&&v.parts<=1000&&Array.isArray(v.levels)&&v.levels.length===3&&v.levels.every(x=>int(x,3))&&int(v.completed,9999)&&int(v.lastCompletedDay,9999)&&(v.job===null||(int(v.job.track,2)&&int(v.job.day,9999)));
 }
 function villageDepthActive(){return !!(survivalEnabled&&villageRules&&villageDepth&&day>=villageDepth.activateDay);}
 function villagePrepared(kind){return villageDepthActive()&&villageDepth.preparedDay===day&&villageDepth.preparation===kind;}
 function villageThreat(){return ['siege','armor','flank'][(day-7+30000)%3];}
-function villageThreatCaption(){return {siege:'投石兵は後方から設備を狙う · 接近で止める',armor:'装甲兵は矢を防ぐ · 斧か貫通の備え',flank:'逆側の群れに備える · 投石兵も来る'}[villageThreat()];}
+function villageThreatCaption(){return {siege:'投石兵は後方から設備を狙う · 接近で止める',armor:'盾は斧か貫通 · 投石には長射程',flank:'速い群れを近い設備で止める'}[villageThreat()];}
 function villageDepthEnemyKind(){
  // A bounded role roster, not an ever-growing crowd. Each group has a siege threat.
  const plan=nightAssaultPlan(),remaining=nightSpawnAllowance(),group=plan.groups[assaultIndex()]||12;
  const index=group-remaining;
  if(day<=(villageDepth.graceUntil||0)){if(assaultIndex()===0&&index===0)return 'thrower';return index%4===0?'breaker':'wolf';}
- if(index===0||(day>=14&&index===Math.floor(group/2)))return 'thrower';
- if(villageThreat()==='armor'||(day>=21&&index%3===1))return index%3===0?'breaker':'armored';
- return villageThreat()==='flank'?(index%4===0?'breaker':'wolf'):(index%3===0?'armored':'raider');
+ const threat=villageThreat();
+ if(villageTacticsActive()&&day>=14){if(index%5===0)return 'thrower';if(index%3===0)return 'armored';return threat==='flank'?'wolf':'breaker';}
+ if(threat==='siege')return index===0||(day>=14&&index===Math.floor(group/2))?'thrower':day>=10&&index===2?'armored':index%3===0?'breaker':'raider';
+ if(threat==='armor')return index===1?'thrower':index%2===0?'armored':index%3===0?'breaker':'raider';
+ return index%4===0?'breaker':'wolf';
 }
 function villageRepairCost(){
  let missing=0,metal=0;for(const s of defenseState.values()){const d=Math.max(0,s.maxHp-s.hp);missing+=d;if(s.type!=='wall')metal+=d;}
@@ -7201,8 +7230,8 @@ function villageWorkChoices(){
  const rows=[{id:'mend',label:'設備を修繕',cost:repair,available:repair.wood>0,apply:()=>{for(const[k,s]of defenseState){s.hp=s.maxHp;const b=blocks.get(k);if(b)b.hp=s.hp;}}},
  {id:'range',label:'今夜の長射程 · 投石兵へ応射',cost:{wood:35,coal:16,iron:4},available:ready,apply:()=>{v.preparedDay=day;v.preparation='range';}},
  {id:'pierce',label:'今夜の貫通矢 · 装甲に対抗',cost:{wood:30,coal:12,iron:6},available:ready,apply:()=>{v.preparedDay=day;v.preparation='pierce';}},
- {id:'repair',label:'修理材を補充 · 倉庫の自動修理',cost:{wood:35,coal:8,iron:2},available:ready&&v.parts<1000,apply:()=>{v.preparedDay=day;v.preparation='repair';v.parts=Math.min(1000,v.parts+240+v.levels[0]*80);}}];
- const names=['工房を増築 · 整備材＋80','見張り小屋を増築 · 準備射程＋0.5','備蓄小屋を増築 · 準備の石炭－2'];
+ {id:'repair',label:'修理材を補充 · 工房・倉庫の自動修理',cost:{wood:35,coal:8,iron:2},available:ready&&v.parts<1000&&(v.levels[0]>0||warehouseObjs.size>0),apply:()=>{v.preparedDay=day;v.preparation='repair';v.parts=Math.min(1000,v.parts+240+v.levels[0]*80);}}];
+ const names=['工房を増築 · 群れの間に自動修繕','見張り小屋を増築 · 準備射程＋0.5','備蓄小屋を増築 · 夜の自動補給＋1回'];
  for(let track=0;track<3;track++)rows.push({id:'job'+track,label:names[track]+' · '+(v.levels[track]+1)+'/3',cost:{wood:60+v.levels[track]*10,coal:18,iron:6},available:!v.job&&v.levels[track]<3,apply:()=>{v.job={track,day};}});
  for(const row of rows)if(['range','pierce','repair'].includes(row.id))row.cost.coal=Math.max(2,row.cost.coal-v.levels[2]*2);
  return rows;
@@ -7215,21 +7244,21 @@ function commitVillageWork(id){
  updateCampVisual();sfx('build');cancelContext();updateDwell(0);return true;
 }
 function villageWorkSite(id){return id==='range'||id==='pierce'||id==='job1'?1:id==='job2'?2:0;}
-function villageServicePoint(track){const g=settlementObjs[track];return g?{x:g.position.x,z:g.position.z+1.9}:null;}
+function villageServicePoint(track){const g=settlementObjs[track];return g?{x:g.position.x-Math.sign(g.position.x)*1.9,z:g.position.z}:null;}
 function villageServiceNear(track){const p=villageServicePoint(track);return !!p&&Math.hypot(pPos.x-p.x,pPos.z-p.z)<1.55;}
-function villageDepthActions(){
- if(!villageDepthActive()||phase!=='day')return [];
- return [0,1,2].filter(villageServiceNear).map(track=>{const p=villageServicePoint(track),lv=villageDepth.levels[track],busy=villageDepth.job?.track===track;
- return {id:'village:service'+track,title:['工房','見張り小屋','備蓄小屋'][track]+' · '+(busy?'増築中 · 夜を守る':lv===3?'増築完了':lv+'/3'),button:'設備を整える',cost:{},effect:['修理材で倉庫の自動修理を支える','今夜の矢を選ぶ','迎撃資材の石炭を節約する'][track],...p,distance:Math.hypot(pPos.x-p.x,pPos.z-p.z),manual:true,apply:()=>false,tag:baseGroundTag};});
+function villageDepthActions(inspectAll=false){
+ if(!villageDepthActive()||(!inspectAll&&phase!=='day'))return [];
+ return [0,1,2].filter(i=>inspectAll||villageServiceNear(i)).map(track=>{const p=villageServicePoint(track),lv=villageDepth.levels[track],busy=villageDepth.job?.track===track;
+ return {id:'village:service'+track,title:['工房','見張り小屋','備蓄小屋'][track]+' · '+(busy?'増築中 · 夜を守る':lv===3?'増築完了':lv+'/3'),button:'設備を整える',cost:{},effect:['修理材で工房・倉庫の自動修理を支える','今夜の矢を選ぶ','迎撃資材の石炭を節約する'][track],...p,distance:Math.hypot(pPos.x-p.x,pPos.z-p.z),manual:true,apply:()=>false,tag:baseGroundTag};});
 }
 function renderVillageWorkOptions(box){
  box.dataset.layout='village';const track=Number(contextChoice.id.slice(-1));
- const quote=()=>contextQuote(contextCurrent())+JSON.stringify(villageDepth)+wood+coal+iron;
+ const quote=()=>contextQuote(contextCurrent())+JSON.stringify(villageDepth);
  for(const c of villageWorkChoices().filter(c=>villageWorkSite(c.id)===track&&(!c.id.startsWith('job')||villageDepth.levels[track]<3))){
   if(c.id==='mend'&&!c.available)continue;
   const b=optionButton(box,c.label+' · '+costWords(c.cost),!c.available||!canAfford(c.cost),quote,()=>commitVillageWork(c.id));
   const titles={mend:'設備を修繕',range:'長射程の矢',pierce:'貫通の矢',repair:'修理材を補充',job0:'工房を増築',job1:'見張り小屋を増築',job2:'備蓄小屋を増築'};
-  const effects={mend:'傷んだ設備を全回復',range:'今夜、投石兵へ応射',pierce:'今夜、装甲を貫く',repair:'倉庫の自動修理を支える',job0:'整備材＋80',job1:'準備射程＋0.5',job2:'準備の石炭－2'};
+  const effects={mend:'傷んだ設備を全回復',range:'今夜、投石兵へ応射',pierce:'今夜、装甲を貫く',repair:'工房・倉庫の自動修理を支える',job0:'群れの間に自動修繕',job1:'準備射程＋0.5',job2:'自動補給＋1回・石炭10/回'};
   b.className='serviceOption';b.setAttribute('aria-label',c.label+' · '+costWords(c.cost));b.textContent='';
   const title=document.createElement('strong');title.textContent=titles[c.id];b.appendChild(title);
   const effect=document.createElement('span');effect.className='serviceEffect';effect.textContent=effects[c.id]+(c.id.startsWith('job')?' · '+(villageDepth.levels[track]+1)+'/3':'');b.appendChild(effect);
@@ -7247,12 +7276,13 @@ function settleVillageWork(){
  if(track===1)iron+=8;
  if(track===2){wood+=30;coal+=15;}
 }
-function villageDepthRewards(pool){
- if(!villageDepthActive())return;
+function villageRewards(pool){
+ if(!survivalEnabled)return;
+ const target=[...defenseState.values()].filter(st=>st.level<defenseUpgradeLimit()).sort((a,b)=>a.level-b.level)[0];
+ const build=target?{icon:'fort',name:typeName(target.type)+'1基を改修',desc:'Lv.'+target.level+' → '+(target.level+1)+'・全回復',apply:()=>{target.level++;target.maxHp=getDefenseMaxHp(target.type,target.level);target.hp=target.maxHp;if(target.type==='warehouse')warehouseBonus+=25;}}:{icon:'repair',name:'修理材を備蓄',desc:'修理材 +120 · 工房・倉庫が使用',apply:()=>villageDepth.parts=Math.min(1000,villageDepth.parts+120)};
  pool.splice(0,3,
- {icon:'supply',name:'建築用の木材',desc:'木材 +35 · 修繕か増築へ',apply:()=>wood+=35},
- {icon:'supply',name:'迎撃用の資材',desc:'石炭 +12 / 鉄 +6 · 今夜の備えへ',apply:()=>{coal+=12;iron+=6;}},
- {icon:'repair',name:'補給所の修繕材',desc:'修繕材 +120 · 補給所が損傷時に使用',apply:()=>villageDepth.parts=Math.min(1000,villageDepth.parts+120)});
+ {icon:'supply',name:'建築用の木材',desc:'木材 +35 · 建築か修繕へ',apply:()=>wood+=35},
+ {icon:'supply',name:'迎撃用の資材',desc:baseLevel<3?'石炭 +20 · 炉と設備へ':'石炭 +12 / 鉄 +6 · 次の備えへ',apply:()=>{if(baseLevel<3)coal+=20;else{coal+=12;iron+=6;}}},build);
 }
 function updateVillageSiege(e,dt){
  if(!villageDepthActive()||e.kind!=='thrower')return false;
@@ -7266,7 +7296,7 @@ function updateVillageSiege(e,dt){
  if(e.siegeT>=2&&!e.siegeMark){e.siegeMark=makeRing(1.4,0xff845d,.7);e.siegeMark.position.set(target.x,.65,target.z);scene.add(e.siegeMark);sfx('wave');}
  if(e.siegeMark)e.siegeMark.scale.setScalar(1+Math.sin(e.siegeT*7)*.1);
  if(e.siegeT>=4){e.siegeT=0;if(e.siegeMark){disposeObject(e.siegeMark);e.siegeMark=null;}
-  if(target.s){target.s.hp-=32;target.s.frost=6;const b=blocks.get(target.k);if(b)b.hp=target.s.hp;if(target.s.hp<=0)removeBlock(target.x,1,target.z);}
+  if(target.s){target.s.hp-=villageTacticsActive()?(day>=21?64:day>=14?48:32):32;target.s.frost=6;const b=blocks.get(target.k);if(b)b.hp=target.s.hp;if(target.s.hp<=0)removeBlock(target.x,1,target.z);}
   else baseHP-=24;
   impactPulse(target.x,target.z,0xff845d,2);sfx('axeHit');
  }
@@ -7304,6 +7334,111 @@ function addVillageServiceDetails(){
 function updateVillageServiceMotion(){
  for(const g of settlementObjs){const flag=g.userData.serviceMoving;if(flag)flag.rotation.y=settings.motion?Math.sin(gameElapsed*2)*.22:0;}
 }
+
+function updateVillageFieldSupport(dt){
+ if(!villageDepthActive()||phase!=='night')return;
+ const v=villageDepth;
+ if(v.fuelDay!==day){v.fuelDay=day;v.fuelUsed=0;}
+ if(v.levels[2]>0&&v.fuelUsed<v.levels[2]&&fuel<35&&coal>=10){coal-=10;fuel=Math.min(100,fuel+40);v.fuelUsed++;showResourceDelivery({coal:10},-1.8,0);toast('備蓄から石炭10 · 自動補給');sfx('fuel');}
+ if(!inNightRespite()||v.levels[0]===0||v.parts<=0)return;
+ const target=[...defenseState].filter(([,st])=>st.hp>0&&st.hp<st.maxHp).sort((a,b)=>a[1].hp/a[1].maxHp-b[1].hp/b[1].maxHp)[0];
+ if(!target)return;const[k,st]=target,used=Math.min(v.parts,(4+4*v.levels[0])*dt,st.maxHp-st.hp);st.hp+=used;v.parts-=used;const b=blocks.get(k);if(b)b.hp=st.hp;
+}
+
+
+// ---- village-tactics ----
+// One replaceable role per tower. Existing levels, damage and investment are never rewritten.
+const TOWER_TACTICS={
+ sniper:{day:7,name:'狙撃塔',role:'遠くの投石兵へ · 足元8mは撃てない',color:0x75d9ed,range:30,minRange:8,rate:1.3,damage:3},
+ scatter:{day:7,name:'散弾塔',role:'近い群れ5体へ · 射程12m',color:0xf7a268,range:12,minRange:0,rate:.9,damage:1.2,splash:3,targets:5},
+ pierce:{day:14,name:'貫通塔',role:'盾を抜く単発砲 · 群れに弱い',color:0xe8cd6e,range:16,minRange:0,rate:.75,damage:1.8},
+ repel:{day:21,name:'阻止塔',role:'近い群れを押し戻す · 低火力',color:0x99bcff,range:13,minRange:0,rate:1.4,damage:.4,splash:4,targets:8,push:3}
+};
+function villageTacticsActive(){return villageDepthActive()&&villageDepth.tacticsVersion===1&&day>=(villageDepth.tacticsStartDay||7);}
+function villageAttackAngles(){const a=nextRaid?.angle||0;return day>=21?[a,a+Math.PI,a+Math.PI/2,a-Math.PI/2]:day>=14?[a,a+Math.PI,a+Math.PI/2]:[a,a+Math.PI];}
+function towerCombatProfile(st){const spec=TOWER_TACTICS[st?.specialization],lv=st?.level||1;if(spec)return spec;return {range:turretRange(lv)+(villagePrepared('range')?6+villageDepth.levels[1]*.5:0),minRange:0,rate:Math.max(.34,T_RATE-(lv-1)*.12),damage:1};}
+function tacticCost(spec){return spec?{wood:100,coal:18,iron:12}:{wood:0,coal:0,iron:0};}
+function commitTowerTactic(p,spec){
+ const st=defenseState.get(key(p.x,1,p.z)),rule=TOWER_TACTICS[spec];
+ if(!survivalEnabled||!running||paused||phase!=='day'||!st||st.type!=='turret'||st.specialization===spec||distanceToDefense(st.type,p.x,p.z)>3.2|| (spec&&(!rule||day<rule.day))||!canAfford(tacticCost(spec)))return false;
+ const before=snapshotRun(),cost=tacticCost(spec);wood-=cost.wood;coal-=cost.coal;iron-=cost.iron;st.specialization=spec||null;refreshDefenseVisual(p.x,1,p.z);
+ if(!saveRun()){resumeRun(before);return false;}
+ sfx('build');cancelContext();return true;
+}
+function applyTacticHit(a,e){
+ const spec=TOWER_TACTICS[a.tactic],targets=spec?.splash?enemies.filter(t=>enemyTargetable(t)&&t.model.g.position.distanceTo(e.model.g.position)<=spec.splash).sort((x,y)=>Number(y===e)-Number(x===e)).slice(0,spec.targets):[e];
+ for(const target of targets){damageEnemy(target,a.dmg,a.tactic==='pierce'?'pierce':'ranged');if(spec?.push&&target.kind!=='boss'){const p=target.model.g.position,d=Math.hypot(p.x,p.z)||1,push=target.kind==='armored'?.5:spec.push,x=p.x+p.x/d*push,z=p.z+p.z/d*push;if(!solidAt(x,z)&&Math.max(Math.abs(x),Math.abs(z))<R_INNER-.4){p.x=x;p.z=z;}target.slowUntil=gameElapsed+1.5;}}
+ if(spec?.splash)impactPulse(e.model.g.position.x,e.model.g.position.z,spec.color,spec.splash);
+}
+function addTowerTacticModel(g,id){
+ const s=TOWER_TACTICS[id];if(!s)return;g.userData.specialization=id;
+ const add=(w,h,d,x,y,z)=>{const m=box(w,h,d,s.color);m.position.set(x,y,z);g.add(m);};
+ // Weapon silhouette above the low roof: long crossbow, fan, twin rails, or a broad coil.
+ if(id==='sniper'){add(.32,.3,3.7,0,3.25,.7);add(2.1,.17,.25,0,3.25,1.8);add(.18,.75,.18,-.7,3.3,-.6);}
+ if(id==='scatter')for(const x of [-.7,0,.7]){add(.4,.4,1.35,x,3.25,.7);add(.5,.12,.2,x,3.5,1.3);}
+ if(id==='pierce'){for(const x of [-.3,.3])add(.2,.3,2.7,x,3.25,.6);add(1.7,.25,.5,0,3.25,-.55);}
+ if(id==='repel'){add(2.4,.35,2.2,0,3.05,0);for(const x of [-.85,.85])for(const z of [-.7,.7])add(.25,.7,.25,x,3.55,z);}
+}
+function renderTacticOptions(box,p){
+ const st=defenseState.get(key(p.x,1,p.z));if(!survivalEnabled||st?.type!=='turret')return;
+ box.dataset.layout='tactics';
+ const labels={sniper:['投石に強い','足元は撃てない'],scatter:['群れに強い','遠距離に弱い'],pierce:['鎧に強い','群れに弱い'],repel:['群れを押す','火力は低い']};
+ for(const [id,s]of Object.entries(TOWER_TACTICS)){
+  const locked=day<s.day,current=st.specialization===id,c=tacticCost(id),[strong,weak]=labels[id];
+  const label=s.name+' · '+strong+(locked?' · Day'+s.day+'で解放':' · '+weak+(current?' · 選択中':''));
+  const b=optionButton(box,label,locked||current||phase!=='day'||!canAfford(c)||distanceToDefense(st.type,p.x,p.z)>3.2,()=>contextQuote(),()=>commitTowerTactic(p,id));b.dataset.tactic=id;b.setAttribute('aria-label',label);
+  b.textContent='';const name=document.createElement('strong');name.textContent=s.name+(current?' ✓':'');b.appendChild(name);
+  const role=document.createElement('small');role.textContent=strong;b.appendChild(role);
+  const detail=document.createElement('small');detail.textContent=locked?'Day'+s.day+'で解放':weak;b.appendChild(detail);
+ }
+ if(st.specialization){const b=optionButton(box,'通常の矢塔へ · 無料',phase!=='day'||distanceToDefense(st.type,p.x,p.z)>3.2,()=>contextQuote(),()=>commitTowerTactic(p,null));b.className='tacticReset';}
+}
+
+function materialReadout(c){return [['wood','木'],['coal','炭'],['iron','鉄']].filter(([k])=>c[k]>0).map(([k,n])=>{const owned={wood,coal,iron}[k],need=c[k];return n+' '+Math.floor(owned)+'/'+need+(owned<need?'（あと'+Math.ceil(need-owned)+'）':'');}).join('　')||'資材不要';}
+function furnaceUpgradeCost(){return {wood:70*(villageDepth?.furnaceLevel||1),coal:20,iron:(villageDepth?.furnaceLevel||1)>1?10:0};}
+function upgradeFurnace(){const lv=villageDepth?.furnaceLevel||1,need=lv===1?3:7,c=furnaceUpgradeCost();if(!survivalEnabled||phase!=='day'||lv>=3||day<need||!canAfford(c)||Math.hypot(pPos.x,pPos.z)>6.5)return false;const before=snapshotRun();wood-=c.wood;coal-=c.coal;iron-=c.iron;villageDepth.furnaceLevel=lv+1;updateFurnaceInsulationVisual();if(!saveRun()){resumeRun(before);return false;}sfx('upgrade');cancelContext();return true;}
+function updateTacticsForecast(){
+ const el=$('tacticsForecast');if(!el)return;el.hidden=!running||paused||!villageTacticsActive()||phase!=='day';$('journey').style.display=el.hidden?'':'none';if(el.hidden)return;
+ const names=['東','南','西','北'],directions=villageAttackAngles().map(a=>names[((Math.round(a/(Math.PI/2))%4)+4)%4]);
+ const kinds=day>=14?['thrower','armored',villageThreat()==='flank'?'wolf':'breaker']:villageThreat()==='flank'?['wolf','breaker']:['thrower',villageThreat()==='armor'?'armored':'raider'];
+ el.innerHTML='<span>'+directions.join('・')+'</span>'+kinds.map(threatGlyph).join('')+'<small>'+ (day>=21?'四方突破':day>=14?'三方混成':'挟撃')+'</small>';
+ el.setAttribute('aria-label','今夜 '+directions.join('と')+'から '+kinds.join(' '));
+}
+function facilityInReach(a){if(!a)return false;if(['fuel','base','repair'].includes(a.id))return Math.hypot(pPos.x,pPos.z)<=6.5;if(a.id.startsWith('village:'))return Math.hypot(pPos.x-a.x,pPos.z-a.z)<1.55;return (a.id.startsWith('equipment:')||a.id.startsWith('upgrade:')||a.id.startsWith('build:')?distanceToDefense(a.previewType||'wall',a.x,a.z):Math.hypot(pPos.x-a.x,pPos.z-a.z))<=3.2;}
+function facilityDetails(a){
+ if(contextChoice?.mode==='info'&&a.id.startsWith('equipment:')&&a.previewType==='turret'&&survivalEnabled)return '特化は1種類 · 共通の素材費\n所持 / 必要：\n'+materialReadout(tacticCost('sniper')).replaceAll('　','\n')+(!facilityInReach(a)?'\n近づくと変更できます':phase!=='day'?'\n昼に変更できます':'');
+ const p=a.id.startsWith('equipment:')?buildPads[Number(a.id.split(':')[1])]:null,st=p&&defenseState.get(key(p.x,1,p.z));let reason='';
+ if(!facilityInReach(a))reason='近づくと操作できます';
+ else if(phase!=='day'&&!['fuel','repair'].includes(a.id))reason='昼に変更できます';
+ else if(st?.level>=MAX_DEF_LV||a.id==='base'&&baseLevel>=5)reason='最大強化';
+ else if(st&&st.level>=defenseUpgradeLimit())reason='拠点Lv.'+(st.level+1)+'が必要';
+ else if(p&&!st&&baseLevel<requiredBaseLevel(p.type))reason='拠点Lv.'+requiredBaseLevel(p.type)+'で解放';
+ else if(a.id==='fuel'&&fuel>80)reason='燃料は十分です';
+ else if(a.available===false)reason=blockedReason(a)||'現在は実行できません';
+ const role=a.id==='fuel'?'燃料 '+Math.ceil(fuel)+'% · 補給 +40%':a.id==='base'?'耐久 '+Math.ceil(baseHP)+'/'+baseMax+(baseLevel<5?' · 強化 +120':''):a.effect;
+ return role+'\n所持 / 必要：\n'+materialReadout(a.cost).replaceAll('　','\n')+(reason?'\n'+reason:'');
+}
+function facilityScreenTargets(){
+ if(!running||paused||introStep<2)return [];
+ const rect=renderer.domElement.getBoundingClientRect(),top=Math.max(120,$('hud').getBoundingClientRect().bottom-rect.top+8);
+ return actionCandidates(true).filter(a=>a.id!=='repair'&&!a.id.startsWith('engineer:')).map(a=>{const anchor=actionVisualPoint(a),p=new THREE.Vector3(anchor.x,['base','fuel'].includes(a.id)?1.4:1.8,anchor.z).project(camera);return {id:a.id,x:rect.left+(p.x*.5+.5)*rect.width,y:rect.top+(-p.y*.5+.5)*rect.height,z:p.z,a};}).filter(p=>p.z>-1&&p.z<1&&p.x>rect.left+22&&p.x<rect.right-22&&p.y>rect.top+top&&p.y<rect.bottom-100);
+}
+function selectFacilityAt(x,y){
+ const target=facilityScreenTargets().filter(p=>Math.abs(p.x-x)<=27&&Math.abs(p.y-y)<=32).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
+ if(!target){cancelContext();return false;}return inspectFacility(target.id);
+}
+function inspectFacility(id){const a=actionCandidates(true).find(a=>a.id===id);cancelContext();if(!a)return false;contextInspectId=id;actionFocus=a;if(id.startsWith('village:'))contextChoice={id,mode:'village'};if(['fuel','base'].includes(id))contextChoice={id,mode:'info'};contextChoosing=false;updateContextUI();updateManualTarget();return true;}
+
+function renderFurnaceOptions(box){
+ if(!survivalEnabled)return;const lv=villageDepth.furnaceLevel||1,unlock=lv===1?3:7,c=furnaceUpgradeCost();
+ const label=lv>=3?'炉の断熱 Lv.3（最大）':'炉の断熱 Lv.'+(lv+1)+' · 燃料消費を初期値の'+(100-lv*10)+'%へ\n'+materialReadout(c)+(day<unlock?' · Day'+unlock+'で解放':'');
+ optionButton(box,label,lv>=3||day<unlock||phase!=='day'||!canAfford(c)||Math.hypot(pPos.x,pPos.z)>6.5,()=>contextQuote(),upgradeFurnace);
+}
+function renderCampRepair(box){if(!canRepairCamp())return;const c={wood:30,coal:5};optionButton(box,'拠点を修理 · 耐久 +180\n'+materialReadout(c),baseHP>=baseMax||!canAfford(c)||Math.hypot(pPos.x,pPos.z)>6.5,()=>contextQuote()+baseHP+wood+coal,()=>{if(!canRepairCamp()||baseHP>=baseMax||!canAfford(c)||Math.hypot(pPos.x,pPos.z)>6.5)return;wood-=30;coal-=5;baseHP=Math.min(baseMax,baseHP+180);saveRun();sfx('build');cancelContext();});}
+
+function updateFurnaceInsulationVisual(){if(!fireGroup)return;const lv=survivalEnabled?(villageDepth?.furnaceLevel||1):1;if(fireGroup.userData.insulationLevel===lv)return;const old=fireGroup.userData.insulation;if(old){fireGroup.remove(old);disposeObject(old);}const g=new THREE.Group();if(lv>1)for(const x of [-1.1,1.1])for(const z of [-.85,.85]){const m=box(.3,.65+(lv-2)*.3,.3,0x71969d);m.position.set(x,.5,z);g.add(m);}fireGroup.add(g);fireGroup.userData.insulation=g;fireGroup.userData.insulationLevel=lv;}
+
+function villageUnlockCaption(){return survivalEnabled?({7:'狙撃・散弾が解放 · 塔をタップ',14:'貫通が解放 · 三方向に備える',21:'阻止が解放 · 四方から接近'}[day]||''):'';}
 
 
 // ---- daily-challenge ----
@@ -7458,7 +7593,7 @@ function boot() {
     bindContextControls();
     $("expeditionCancel").onclick=closeExpedition;$("expeditionConfirm").onclick=confirmExpedition;
     $("equipmentCancel").onclick=closeEquipment;$("equipmentConfirm").onclick=confirmEquipment;
-    $("equipmentUpgrade").onclick=()=>{const p=buildPads[equipmentDraft.index],st=defenseState.get(key(p.x,1,p.z));if(st&&st.level<Math.min(MAX_DEF_LV,baseLevel+1)&&canAfford(getUpgradeCost(st))){upgradeDefense({x:p.x,y:1,z:p.z,state:st});closeEquipment();}};
+    $("equipmentUpgrade").onclick=()=>{const p=buildPads[equipmentDraft.index],st=defenseState.get(key(p.x,1,p.z));if(st&&st.level<defenseUpgradeLimit()&&canAfford(getUpgradeCost(st))){upgradeDefense({x:p.x,y:1,z:p.z,state:st});closeEquipment();}};
     resizeViewport();
     renderer.domElement.addEventListener("webglcontextlost", (e) => {
       e.preventDefault();
