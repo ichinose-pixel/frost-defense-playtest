@@ -1744,8 +1744,8 @@ function updateIntroGuide(){
   }
   const close=objectiveTarget&&Math.hypot(pPos.x-objectiveTarget.x,pPos.z-objectiveTarget.z)<1.4;
   const assembling=constructionSites.some(s=>s.p.type==='turret');
-  const titles=['木に近づこう',assembling?'組み立て中':close?'建築ボタンをタップ':'矢塔の形へ','炉へ戻ろう'];
-  const notes=['指を滑らせて移動',close?'指を離す → タップ・木材40':'矢塔のそばへ移動','最初の夜を迎えよう'];
+  const titles=['木に近づこう',assembling?'建築中':close?'建築ボタンをタップ':'矢塔の形へ','炉へ戻ろう'];
+  const notes=['指を滑らせて移動',assembling?'少し離れると完成':close?'指を離す → タップ・木材40':'矢塔のそばへ移動','最初の夜を迎えよう'];
   $('introNumber').textContent=`${step+1} / 3`;
   $('introTitle').textContent=gameElapsed<guideCelebrateUntil?(step===1?'採集できた！':'矢塔が完成！'):titles[step];
   $('introHelp').textContent=notes[step];
@@ -1756,6 +1756,8 @@ function updateIntroGuide(){
     hand.style.left=Math.max(50,Math.min(rect.width-50,(v.x*.5+.5)*rect.width+36))+'px';
     hand.style.top=Math.max(210,Math.min(rect.height-250,(-v.y*.5+.5)*rect.height+30))+'px';
   }
+  if(step===1&&!assembling&&!$('quickDock').hidden){const r=$('quickAction').getBoundingClientRect();hand.hidden=false;hand.setAttribute('data-tap','true');hand.style.left=(r.left+18)+'px';hand.style.top=(r.top-12)+'px';}else hand.setAttribute('data-tap','false');
+  if(assembling){const rect=renderer.domElement.getBoundingClientRect();hand.hidden=false;hand.setAttribute('data-release','false');hand.style.left=(rect.width-100)+'px';hand.style.top=(rect.height*.55)+'px';}
 }
 
 
@@ -4413,17 +4415,8 @@ function resetInput() {
   if (id !== null && renderer?.domElement.hasPointerCapture?.(id))
     renderer.domElement.releasePointerCapture(id);
 }
-function bindInput() {
-  const canvas = renderer.domElement;
-  const viewport = $("gameViewport");
-  for (const event of ["selectstart", "dragstart", "contextmenu"])
-    viewport.addEventListener(event, (e) => e.preventDefault());
-  // Clear an existing selection when returning to gameplay; buttons retain clicks.
-
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  canvas.addEventListener(
-    "pointerdown",
-    (e) => {
+function beginThumbMovement(e){
+  const canvas=renderer.domElement;
       if (
         !running ||
         document.hidden ||
@@ -4443,6 +4436,19 @@ function bindInput() {
       joyBase.style.cssText = `display:block;left:${joyBase._ox - 62}px;top:${joyBase._oy - 62}px`;
       joyKnob.style.cssText = `display:block;left:${joyBase._ox - 27}px;top:${joyBase._oy - 27}px`;
       audioCtx?.resume();
+}
+function bindInput() {
+  const canvas = renderer.domElement;
+  const viewport = $("gameViewport");
+  for (const event of ["selectstart", "dragstart", "contextmenu"])
+    viewport.addEventListener(event, (e) => e.preventDefault());
+  // Clear an existing selection when returning to gameplay; buttons retain clicks.
+
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  canvas.addEventListener(
+    "pointerdown",
+    (e) => {
+      beginThumbMovement(e);
     },
     { passive: false },
   );
@@ -4748,13 +4754,13 @@ function confirmDefenseUpgrade(){
   haptic(20);saveRun();updateDwell(0);return true;
 }
 function updateManualTarget(){
-  const a=actionFocus,visible=running&&!paused&&!!contextInspectId&&a?.manual;
+  const a=actionFocus,visible=running&&!paused&&!!(contextInspectId||quickTargetId)&&a?.manual;
   if(!manualTargetOutline&&visible){
     manualTargetOutline=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1,1,1)),new THREE.LineBasicMaterial({color:0xffdd78,depthTest:false}));
     manualTargetOutline.renderOrder=30;scene.add(manualTargetOutline);
   }
   if(!manualTargetOutline)return;manualTargetOutline.visible=!!visible;
-  if(visible){const point=actionVisualPoint(a),f=a.id==='fuel'?{width:2.2,depth:2.2}:['base','repair'].includes(a.id)?{width:2.8,depth:2.4}:defenseFootprint(a.id.startsWith('equipment:')?'turret':'wall',a.x,a.z);manualTargetOutline.position.set(point.x,.61,point.z);manualTargetOutline.scale.set(f.width+.3,.1,f.depth+.3);}
+  if(visible){const point=actionVisualPoint(a),f=['fuel','furnace'].includes(a.id)?{width:2.2,depth:2.2}:['base','repair'].includes(a.id)?{width:2.8,depth:2.4}:defenseFootprint(a.id.startsWith('equipment:')?'turret':'wall',a.x,a.z);manualTargetOutline.position.set(point.x,.61,point.z);manualTargetOutline.scale.set(f.width+.3,.1,f.depth+.3);}
 }
 function updateManualControls(candidates,candidate){
   const choices=$("defenseChoices"),button=$("confirmDefense"),manual=candidates.filter(a=>a.manual);
@@ -6270,7 +6276,7 @@ function updateCampLifeUI(){
 function layoutBottomMessages(){
   const rect=renderer.domElement.getBoundingClientRect(),action=$("actionPanel"),post=$("outpostCard");
   let bottom=100;
-  for(const el of [action,post])if(!el.hidden)bottom=Math.max(bottom,rect.bottom-el.getBoundingClientRect().top+12);
+  for(const el of [action,post,$("quickDock")])if(!el.hidden)bottom=Math.max(bottom,rect.bottom-el.getBoundingClientRect().top+12);
   $("toast").style.bottom=bottom+"px";
 }
 function validCampPortrait(value){return typeof value==="string"&&value.length<300000&&/^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(value);}
@@ -6600,7 +6606,9 @@ function updateExpeditionCard(){$('outpostCard').hidden=true;}
 let routeMenuOpen=false,contextInspectId=null;
 let contextChoice=null, contextChoosing=false, contextArmed=null, contextRevision=0;
 let contextLastCommit=-Infinity, contextPreview=null, contextPreviewKey='';
-function cancelContext(){
+let quickTargetId=null;
+function cancelContext(preserveQuick=false){
+  if(!preserveQuick)quickTargetId=null;
   routeMenuOpen=false;contextInspectId=null;
   contextChoice=null;contextChoosing=false;contextArmed=null;contextRevision++;
   $('contextOptions').hidden=true;$('contextPause').hidden=true;
@@ -6608,41 +6616,121 @@ function cancelContext(){
 function contextPad(){return actionFocus?.id.startsWith('equipment:')?buildPads[Number(actionFocus.id.split(':')[1])]:null;}
 function contextQuote(a=actionFocus){
   if(!a)return '';
-  const p=a.id.startsWith('equipment:')?buildPads[Number(a.id.split(':')[1])]:null;
+  const p=a.id.startsWith('equipment:')||a.id.startsWith('build:')?buildPads[Number(a.id.split(':')[1])]:null;
   const st=defenseState.get(key(a.x,1,a.z));
   return JSON.stringify([a.id,a.cost,a.available!==false,a.previewType,a.previewLevel,st?.type,st?.level,st?.specialization,p?.built,p?.constructing,baseLevel,phase,day,expedition.route,expedition.usedNight,contextRevision]);
 }
-function contextCurrent(){return contextInspectId?actionCandidates(true).find(a=>a.id===contextInspectId)||null:null;}
+function quickActionCandidates(){
+ const actions=actionCandidates(true);for(const p of buildPads)if(p.type==='wall'&&p.constructing)actions.push({id:'build:'+p.index,manual:true,x:p.x,z:p.z,title:typeName(p.type,p.x,p.z)+' · 建築中',cost:{},available:false,apply:()=>false});if(survivalEnabled&&introStep>=3){const lv=villageDepth.furnaceLevel||1,c=furnaceUpgradeCost();actions.push({id:"furnace",manual:true,effect:lv>=3?"夜の燃料消費を初期値の80%に維持":"夜の燃料消費を初期値の"+(100-lv*10)+"%へ",x:fireGroup.position.x,z:fireGroup.position.z,title:"炉の断熱 Lv."+lv+(lv<3?" → "+(lv+1):"（最大）"),cost:c,available:phase==="day"&&lv<3&&day>=(lv===1?3:7)&&canAfford(c),apply:upgradeFurnace});}return actions;
+}
+function contextCurrent(){const id=contextInspectId||quickTargetId;return id?quickActionCandidates().find(a=>a.id===id)||null:null;}
+function quickCandidates(){
+  return quickActionCandidates().filter(a=>a.id!=='repair'&&facilityInReach(a)).sort((a,b)=>{
+    const distance=a=>['fuel','base','furnace'].includes(a.id)?Math.hypot(pPos.x-actionVisualPoint(a).x,pPos.z-actionVisualPoint(a).z):a.distance??Math.hypot(pPos.x-a.x,pPos.z-a.z);
+    return distance(a)-distance(b)||a.id.localeCompare(b.id);
+  });
+}
+function selectQuickFacility(id){
+  if(contextArmed||!quickActionCandidates().some(a=>a.id===id))return false;
+  cancelContext();quickTargetId=id;updateDwell(0);updateManualTarget();return true;
+}
+function quickUnavailableReason(a){
+  if(!a)return '';
+  const index=Number(a.id.split(':')[1]),p=a.id.startsWith('equipment:')||a.id.startsWith('build:')?buildPads[index]:null;
+  const st=defenseState.get(key(a.x,1,a.z));
+  if(a.id==='furnace'){const lv=villageDepth.furnaceLevel||1;if(lv>=3)return '最大Lv.3';if(day<(lv===1?3:7))return 'Day'+(lv===1?3:7)+'で解放';}
+  if(p?.constructing)return '少し離れると完成';
+  if(!facilityInReach(a))return '近づくと実行できます';
+  if(contextChoice?.mode==='info'&&st?.type==='turret')return '特化は詳細の選択ボタンから';
+  if(contextChoice?.mode==='exchange')return '交換する種類を選択';
+  if(phase!=='day'&&!['fuel','repair'].includes(a.id)&&!a.id.startsWith('engineer:'))return '昼に建築・強化できます';
+  if(a.id==='base'&&baseLevel>=5||st?.level>=MAX_DEF_LV)return '最大Lv.5';
+  if(st&&st.level>=defenseUpgradeLimit())return '拠点Lv.'+(st.level+1)+'が必要';
+  if(p&&!padUnlocked(p))return '拠点Lv.'+(p.z<0?3:4)+'で解放';
+  if(p&&!st&&baseLevel<requiredBaseLevel(a.previewType||p.type))return '拠点Lv.'+requiredBaseLevel(a.previewType||p.type)+'で解放';
+  if(p?.type!=='wall'&&p&&!st&&equipmentUsed()>=equipmentCapacity)return '建設枠 '+equipmentUsed()+'/'+equipmentCapacity+' · 既存設備で交換';
+  if(a.id==='fuel'&&fuel>80)return '燃料は十分です';
+  const missing=[['wood','木'],['coal','炭'],['iron','鉄']].filter(([k])=>(a.cost[k]||0)>{wood,coal,iron}[k]).map(([k,n])=>n+'あと'+Math.ceil(a.cost[k]-{wood,coal,iron}[k]));
+  if(missing.length)return missing.join(' · ');
+  return a.available===false?blockedReason(a):'';
+}
+function updateQuickControls(){
+  const moving=joyId!==null||movementRequested();
+  if(moving){quickTargetId=null;$('quickDock').hidden=true;return;}
+  const candidates=quickCandidates();
+  if(contextInspectId)quickTargetId=contextInspectId;
+  if(!contextCurrent()&&!contextArmed){const built=quickTargetId?.startsWith('build:')?buildPads[Number(quickTargetId.split(':')[1])]:null;quickTargetId=built?.built?'upgrade:'+key(built.x,1,built.z):candidates[0]?.id||null;}
+  const a=contextCurrent(),dock=$('quickDock');
+  dock.hidden=!running||paused||introStep<2||!a||routeMenuOpen;
+  if(dock.hidden)return;
+  const reason=quickUnavailableReason(a),p=a.id.startsWith('equipment:')||a.id.startsWith('build:')?buildPads[Number(a.id.split(':')[1])]:null,st=p&&defenseState.get(key(p.x,1,p.z));
+  const constructing=!!p?.constructing;
+  $('quickTitle').textContent=constructing?typeName(p.type,p.x,p.z)+' · 建築中':a.id==='fuel'?'炉 · 燃料補給':a.id==='base'?'拠点 Lv.'+baseLevel+(baseLevel<5?' → '+(baseLevel+1):'（最大）'):a.title;
+  $('quickCost').textContent=(constructing?'支払い済み':materialReadout(a.cost).replace(/（あと[^）]*）/g,'').replaceAll('　',' · '));
+  $('quickReason').textContent=reason;$('quickReason').hidden=!reason;
+  const verb=constructing?'建築中':a.id==='fuel'?'補給':['base','furnace'].includes(a.id)||st||a.id.startsWith('upgrade:')?'強化':a.id.startsWith('equipment:')||a.id.startsWith('build:')?'建築':a.button||'確認';
+  $('quickVerb').textContent=verb;$('quickGlyph').textContent=constructing?'…':reason?'−':verb==='補給'?'炭':verb==='強化'?'↑':'＋';
+  $('quickAction').setAttribute('aria-label',a.title+' · '+(reason||verb));
+  $('quickAction').setAttribute('aria-disabled',String(!!reason));
+  $('quickAction').dataset.blocked=String(!!reason);
+  $('quickCycle').hidden=candidates.length<2;
+  const next=candidates[(candidates.findIndex(t=>t.id===a.id)+1)%candidates.length];
+  const nextName=next?.id==='base'?'拠点':next?.id==='fuel'?'炉補給':next?.id==='furnace'?'炉断熱':next?.title?.replace(/を建てる| Lv\..*|をLv\..*/g,'')||'次';
+  $('quickCycle').textContent=nextName+'へ '+candidates.length;
+  $('quickCycle').setAttribute('aria-label','次は'+nextName+' · 近くに'+candidates.length+'対象');
+  $('quickMore').textContent=p&&!st?'種類':st?.type==='turret'&&survivalEnabled?'特化':'詳細';
+}
+function bindQuickControls(){
+  bindFreshPress($('quickAction'),()=>contextQuote(contextCurrent()),q=>{
+    const a=contextCurrent(),reason=quickUnavailableReason(a);
+    if(reason){$('quickReason').textContent=reason;$('quickReason').hidden=false;return;}
+    executeContext(q);
+  });
+  bindFreshPress($('quickCycle'),()=>contextQuote(contextCurrent()),()=>{
+    const candidates=quickCandidates(),index=candidates.findIndex(a=>a.id===quickTargetId);
+    if(candidates.length>1)selectQuickFacility(candidates[(index+1)%candidates.length].id);
+  });
+  bindFreshPress($('quickMore'),()=>contextQuote(contextCurrent()),()=>{
+    const a=contextCurrent();if(!a)return;inspectFacility(a.id);
+    const p=contextPad();if(p)beginContextChoice(p.built?'info':'type');
+    else if(a.id==='expedition:sawmill')beginContextChoice('expedition');
+    updateContextUI();
+  });
+}
 function executeContext(quote){
   if(!running||paused||document.hidden||contextLost||joyId!==null||movementRequested()||Date.now()-contextLastCommit<350)return false;
   const a=contextCurrent();if(!a||contextQuote(a)!==quote||a.available===false||!canAfford(a.cost))return false;
   if(a.id.startsWith('village:service')){beginContextChoice('village');return true;}
   if(!facilityInReach(a)||!a.apply())return false;
-  contextLastCommit=Date.now();cancelContext();actionTime=0;defenseActionConsumed=true;
+  contextLastCommit=Date.now();cancelContext();quickTargetId=a.id;actionTime=0;defenseActionConsumed=true;
   haptic(20);saveRun();actionFocus=contextCurrent();updateContextUI();return true;
 }
 function bindFreshPress(button,quote,execute){
   button.addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation?.();
-    if(button.disabled||e.button>0||joyId!==null||movementRequested()||!running||paused)return;
+    if(contextArmed||button.disabled||e.button>0||joyId!==null||movementRequested()||!running||paused)return;
     contextArmed={button,id:e.pointerId,x:e.clientX,y:e.clientY,quote:quote()};
     button.setPointerCapture?.(e.pointerId);
   });
   button.addEventListener('pointerup',e=>{
-    e.preventDefault();e.stopPropagation?.();const press=contextArmed;contextArmed=null;
-    if(!press||press.button!==button||press.id!==e.pointerId||Math.hypot(e.clientX-press.x,e.clientY-press.y)>9)return;
+    e.preventDefault();e.stopPropagation?.();const press=contextArmed;
+    if(!press||press.button!==button||press.id!==e.pointerId)return;contextArmed=null;
+    if(Math.hypot(e.clientX-press.x,e.clientY-press.y)>9)return;
     const r=button.getBoundingClientRect();
     if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom||button.disabled||joyId!==null||movementRequested()||!running||paused||press.quote!==quote())return;
     execute(press.quote);
   });
   button.addEventListener('pointermove',e=>{
-    if(contextArmed?.button===button&&contextArmed.id===e.pointerId&&Math.hypot(e.clientX-contextArmed.x,e.clientY-contextArmed.y)>9)contextArmed=null;
+    if(contextArmed?.button===button&&contextArmed.id===e.pointerId&&Math.hypot(e.clientX-contextArmed.x,e.clientY-contextArmed.y)>9){
+      const press=contextArmed;contextArmed=null;
+      if(button.id==='quickAction'){button.releasePointerCapture?.(e.pointerId);beginThumbMovement({...e,button:0,pointerId:e.pointerId,clientX:press.x,clientY:press.y,preventDefault(){}});}
+    }
   });
-  button.addEventListener('pointercancel',()=>{contextArmed=null;});
-  button.addEventListener('lostpointercapture',()=>{contextArmed=null;});
+  button.addEventListener('pointercancel',e=>{if(contextArmed?.button===button&&contextArmed.id===e.pointerId)contextArmed=null;});
+  button.addEventListener('lostpointercapture',e=>{if(contextArmed?.button===button&&contextArmed.id===e.pointerId)contextArmed=null;});
   button.addEventListener('keydown',e=>{
     if(!['Enter','Space'].includes(e.code))return;e.preventDefault();
-    if(!e.repeat&&!button.disabled&&running&&!paused&&joyId===null&&!movementRequested())contextArmed={button,id:e.code,quote:quote()};
+    if(!contextArmed&&!e.repeat&&!button.disabled&&running&&!paused&&joyId===null&&!movementRequested())contextArmed={button,id:e.code,quote:quote()};
   });
   button.addEventListener('keyup',e=>{
     if(!['Enter','Space'].includes(e.code))return;e.preventDefault();const press=contextArmed;contextArmed=null;
@@ -6725,11 +6813,11 @@ function updateContextRoutes(){
     const b=optionButton(menu,label,false,()=>[phase,day,expedition.facility,expedition.engineer,!!expedition.work].join('|'),()=>chooseRoute(kind));b.title=expeditionDescription(kind);
   }
 }
-function actionVisualPoint(a){if(a.id.startsWith('village:service'))return settlementObjs[Number(a.id.slice(-1))]?.position||a;return a.id==='fuel'?fireGroup.position:['base','repair'].includes(a.id)&&campCore?campCore.position:a;}
+function actionVisualPoint(a){if(a.id.startsWith('village:service'))return settlementObjs[Number(a.id.slice(-1))]?.position||a;return ['fuel','furnace'].includes(a.id)?fireGroup.position:['base','repair'].includes(a.id)&&campCore?campCore.position:a;}
 function updateContextUI(){
-  updateContextRoutes();updateQuietInspect();
+  updateContextRoutes();updateQuickControls();updateQuietInspect();
   const a=contextCurrent();if(contextChoice&&contextChoice.id!==a?.id)cancelContext();actionFocus=a;
-  const panel=$('actionPanel');panel.hidden=!running||paused||!a;
+  const panel=$('actionPanel');panel.hidden=!running||paused||!a||!contextInspectId;
   $('defenseChoices').hidden=true;$('actionTrack').hidden=true;$('campSwitch').hidden=!a||!['fuel','base'].includes(a.id);
   $('selectFurnace').setAttribute('aria-pressed',String(a?.id==='fuel'));$('selectCamp').setAttribute('aria-pressed',String(a?.id==='base'));
   if(panel.hidden){if(contextPreview)contextPreview.visible=false;return;}
@@ -6739,7 +6827,7 @@ function updateContextUI(){
   $('actionCost').textContent=facilityDetails(a);
   $('actionCost').hidden=!$('actionCost').textContent;
   $('actionHelp').hidden=true;
-  const button=$('confirmDefense');button.hidden=['exchange','village'].includes(contextChoice?.mode)||(survivalEnabled&&st?.type==='turret'&&contextChoice?.mode==='info');
+  const button=$('confirmDefense');button.hidden=true;
   button.textContent=a.id==='fuel'?'石炭10で補給':a.id==='base'?(baseLevel>=5?'最大強化':'拠点を強化する'):(a.button||a.title);
   button.disabled=a.available===false||!canAfford(a.cost)||!!p?.constructing||!facilityInReach(a);
   $('contextExchange').hidden=!st||phase!=='day';
@@ -6753,7 +6841,7 @@ function updateContextUI(){
   const anchor=actionVisualPoint(a),rect=renderer.domElement.getBoundingClientRect(),v=new THREE.Vector3(anchor.x,.5,anchor.z).project(camera);
   const width=Math.min(292,rect.width-24),height=panel.offsetHeight||100;
   panel.style.width=width+'px';panel.style.left=(rect.width-width)/2+'px';
-  panel.style.top=Math.max(155,rect.height-height-110)+'px';
+  panel.style.top=Math.max(155,rect.height-height-210)+'px';
   if(introStep===2&&a.id.startsWith('equipment:')){
     const r=button.getBoundingClientRect(),hand=$('gestureGuide');hand.hidden=false;hand.setAttribute('data-tap','true');
     hand.style.left=(r.left-rect.left+r.width*.7)+'px';hand.style.top=(r.top-rect.top+10)+'px';
@@ -6785,12 +6873,13 @@ function updateContextPreview(a,p){
   contextPreview.visible=true;
 }
 function bindContextControls(){
+  bindQuickControls();
   for(const [button,id]of [['selectFurnace','fuel'],['selectCamp','base']])bindFreshPress($(button),()=>contextQuote(),()=>inspectFacility(id));
   bindFreshPress($('siteInspect'),()=>contextQuote(nearbyBuildEntry()),()=>{const a=nearbyBuildEntry();if(a)inspectFacility(a.id);});
   bindFreshPress($('confirmDefense'),()=>contextQuote(contextCurrent()),executeContext);
   bindFreshPress($('contextExchange'),()=>contextQuote(contextCurrent()),()=>beginContextChoice('exchange'));
   bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id.startsWith('village:service')?'village':actionFocus?.id==='expedition:sawmill'?'expedition':contextPad()&&!contextPad().built?'type':'info'));
-  bindFreshPress($('contextClose'),()=>contextQuote(contextCurrent()),()=>{cancelContext();updateDwell(0);});
+  bindFreshPress($('contextClose'),()=>contextQuote(contextCurrent()),()=>{cancelContext(true);updateDwell(0);});
 }
 
 // Dawn and reward screens own separate input epochs. A release cannot cross screens.
@@ -6892,11 +6981,8 @@ function nearbyBuildEntry(){
   return p&&!p.built&&!p.constructing&&!defenseState.has(key(p.x,1,p.z))&&distanceToDefense(p.type,p.x,p.z)<=3.2;
  }).sort((a,b)=>distanceToDefense(a.previewType||'wall',a.x,a.z)-distanceToDefense(b.previewType||'wall',b.x,b.z))[0]||null;
 }
-function updateQuietInspect(){
- const button=$('siteInspect'),a=nearbyBuildEntry();
- button.hidden=!running||paused||introStep<2||joyId!==null||movementRequested()||!!contextInspectId||!a;
- if(!button.hidden){button.textContent='＋ '+a.title;button.setAttribute('aria-label',a.title+'・費用と条件を確認');}
-}
+function updateQuietInspect(){$('siteInspect').hidden=true;}
+
 function objectiveReady(o){
  // Preparation destinations are approach points, not building centers.
  // Do not advertise a remote task while standing at an unavailable local action.
@@ -7415,7 +7501,7 @@ function updateTacticsForecast(){
  el.innerHTML='<span>'+directions.join('・')+'</span>'+kinds.map(threatGlyph).join('')+'<small>'+ (day>=21?'四方突破':day>=14?'三方混成':'挟撃')+'</small>';
  el.setAttribute('aria-label','今夜 '+directions.join('と')+'から '+kinds.join(' '));
 }
-function facilityInReach(a){if(!a)return false;if(['fuel','base','repair'].includes(a.id))return Math.hypot(pPos.x,pPos.z)<=6.5;if(a.id.startsWith('village:'))return Math.hypot(pPos.x-a.x,pPos.z-a.z)<1.55;return (a.id.startsWith('equipment:')||a.id.startsWith('upgrade:')||a.id.startsWith('build:')?distanceToDefense(a.previewType||'wall',a.x,a.z):Math.hypot(pPos.x-a.x,pPos.z-a.z))<=3.2;}
+function facilityInReach(a){if(!a)return false;if(['fuel','furnace','base','repair'].includes(a.id))return Math.hypot(pPos.x,pPos.z)<=6.5;if(a.id.startsWith('village:'))return Math.hypot(pPos.x-a.x,pPos.z-a.z)<1.55;return (a.id.startsWith('equipment:')||a.id.startsWith('upgrade:')||a.id.startsWith('build:')?distanceToDefense(a.previewType||'wall',a.x,a.z):Math.hypot(pPos.x-a.x,pPos.z-a.z))<=3.2;}
 function facilityDetails(a){
  if(contextChoice?.mode==='info'&&a.id.startsWith('equipment:')&&a.previewType==='turret'&&survivalEnabled)return '特化は1種類 · 共通の素材費\n所持 / 必要：\n'+materialReadout(tacticCost('sniper')).replaceAll('　','\n')+(!facilityInReach(a)?'\n近づくと変更できます':phase!=='day'?'\n昼に変更できます':'');
  const p=a.id.startsWith('equipment:')?buildPads[Number(a.id.split(':')[1])]:null,st=p&&defenseState.get(key(p.x,1,p.z));let reason='';
@@ -7437,9 +7523,9 @@ function facilityScreenTargets(){
 }
 function selectFacilityAt(x,y){
  const target=facilityScreenTargets().filter(p=>Math.abs(p.x-x)<=27&&Math.abs(p.y-y)<=32).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
- if(!target){cancelContext();return false;}return inspectFacility(target.id);
+ if(!target){cancelContext();return false;}return selectQuickFacility(target.id);
 }
-function inspectFacility(id){const a=actionCandidates(true).find(a=>a.id===id);cancelContext();if(!a)return false;contextInspectId=id;actionFocus=a;if(id.startsWith('village:'))contextChoice={id,mode:'village'};if(['fuel','base'].includes(id))contextChoice={id,mode:'info'};contextChoosing=false;updateContextUI();updateManualTarget();return true;}
+function inspectFacility(id){const a=quickActionCandidates().find(a=>a.id===id);cancelContext();if(!a)return false;quickTargetId=id;contextInspectId=id;actionFocus=a;if(id.startsWith('village:'))contextChoice={id,mode:'village'};if(['fuel','base'].includes(id))contextChoice={id,mode:'info'};contextChoosing=false;updateContextUI();updateManualTarget();return true;}
 
 function renderFurnaceOptions(box){
  if(!survivalEnabled)return;const lv=villageDepth.furnaceLevel||1,unlock=lv===1?3:7,c=furnaceUpgradeCost();
