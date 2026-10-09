@@ -1449,3 +1449,6 @@ button:disabled{filter:saturate(.35);opacity:.58}
 #actionPanel #contextOptions[data-layout="tactics"]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}#actionPanel #contextOptions[data-layout="tactics"] button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-height:58px;padding:5px 7px;white-space:normal;text-align:left}#actionPanel #contextOptions[data-layout="tactics"] strong{font-size:14px;line-height:1.2}#actionPanel #contextOptions[data-layout="tactics"] small{font-size:11px;line-height:1.2;margin:0}#actionPanel #contextOptions[data-layout="tactics"] .tacticReset{grid-column:1/-1;min-height:32px;align-items:center;justify-content:center}
 
 #actionPanel #contextOptions[data-layout="tactics"] button{flex-direction:column!important}#actionPanel #contextOptions[data-layout="tactics"] button:disabled{opacity:.7}
+
+/* Empty sites retain a discoverable entry; details still require a fresh tap. */
+#siteInspect{min-height:44px;max-width:calc(100% - 116px);bottom:max(16px,env(safe-area-inset-bottom));font-weight:700;background:#315960;color:#fff3cc;border-color:#d4b675}

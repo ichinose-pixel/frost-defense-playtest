@@ -6786,7 +6786,7 @@ function updateContextPreview(a,p){
 }
 function bindContextControls(){
   for(const [button,id]of [['selectFurnace','fuel'],['selectCamp','base']])bindFreshPress($(button),()=>contextQuote(),()=>inspectFacility(id));
-  bindFreshPress($('siteInspect'),()=>JSON.stringify(blockedNearby()?.id),()=>{const a=blockedNearby();if(a){contextInspectId=a.id;contextChoosing=false;updateContextUI();}});
+  bindFreshPress($('siteInspect'),()=>contextQuote(nearbyBuildEntry()),()=>{const a=nearbyBuildEntry();if(a)inspectFacility(a.id);});
   bindFreshPress($('confirmDefense'),()=>contextQuote(contextCurrent()),executeContext);
   bindFreshPress($('contextExchange'),()=>contextQuote(contextCurrent()),()=>beginContextChoice('exchange'));
   bindFreshPress($('contextInfo'),()=>contextQuote(contextCurrent()),()=>beginContextChoice(actionFocus?.id.startsWith('village:service')?'village':actionFocus?.id==='expedition:sawmill'?'expedition':contextPad()&&!contextPad().built?'type':'info'));
@@ -6885,7 +6885,18 @@ function blockedReason(a){
  if(!canAfford(a.cost))return '資材不足・'+costWords(a.cost);
  return a.id==='fuel'?'燃料は十分':a.effect||'利用できません';
 }
-function updateQuietInspect(){$('siteInspect').hidden=true;}
+function nearbyBuildEntry(){
+ return actionCandidates(true).filter(a=>{
+  if(!a.id.startsWith('build:')&&!a.id.startsWith('equipment:'))return false;
+  const p=buildPads[Number(a.id.split(':')[1])];
+  return p&&!p.built&&!p.constructing&&!defenseState.has(key(p.x,1,p.z))&&distanceToDefense(p.type,p.x,p.z)<=3.2;
+ }).sort((a,b)=>distanceToDefense(a.previewType||'wall',a.x,a.z)-distanceToDefense(b.previewType||'wall',b.x,b.z))[0]||null;
+}
+function updateQuietInspect(){
+ const button=$('siteInspect'),a=nearbyBuildEntry();
+ button.hidden=!running||paused||introStep<2||joyId!==null||movementRequested()||!!contextInspectId||!a;
+ if(!button.hidden){button.textContent='＋ '+a.title;button.setAttribute('aria-label',a.title+'・費用と条件を確認');}
+}
 function objectiveReady(o){
  // Preparation destinations are approach points, not building centers.
  // Do not advertise a remote task while standing at an unavailable local action.
@@ -7409,7 +7420,8 @@ function facilityDetails(a){
  if(contextChoice?.mode==='info'&&a.id.startsWith('equipment:')&&a.previewType==='turret'&&survivalEnabled)return '特化は1種類 · 共通の素材費\n所持 / 必要：\n'+materialReadout(tacticCost('sniper')).replaceAll('　','\n')+(!facilityInReach(a)?'\n近づくと変更できます':phase!=='day'?'\n昼に変更できます':'');
  const p=a.id.startsWith('equipment:')?buildPads[Number(a.id.split(':')[1])]:null,st=p&&defenseState.get(key(p.x,1,p.z));let reason='';
  if(!facilityInReach(a))reason='近づくと操作できます';
- else if(phase!=='day'&&!['fuel','repair'].includes(a.id))reason='昼に変更できます';
+ else if(phase!=='day'&&!['fuel','repair'].includes(a.id))reason=a.id.startsWith('build:')||a.id.startsWith('equipment:')&&!st?'昼に建築できます':'昼に変更できます';
+ else if(a.id.startsWith('build:')&&!padUnlocked(buildPads[Number(a.id.split(':')[1])]))reason='拠点Lv.'+(a.z<0?3:4)+'で解放';
  else if(st?.level>=MAX_DEF_LV||a.id==='base'&&baseLevel>=5)reason='最大強化';
  else if(st&&st.level>=defenseUpgradeLimit())reason='拠点Lv.'+(st.level+1)+'が必要';
  else if(p&&!st&&baseLevel<requiredBaseLevel(p.type))reason='拠点Lv.'+requiredBaseLevel(p.type)+'で解放';
